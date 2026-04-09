@@ -30,18 +30,22 @@ app = create_app(
 )
 
 
-def main(host: str = "0.0.0.0", port: int = 8000):
+def main(host: str | None = None, port: int | None = None):
     """Run the development server."""
 
+    import argparse
     import uvicorn
+
+    if host is None and port is None:
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--host", default="0.0.0.0")
+        parser.add_argument("--port", type=int, default=8000)
+        args = parser.parse_args()
+        host = args.host
+        port = args.port
 
     uvicorn.run(app, host=host, port=port)
 
 
 if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--port", type=int, default=8000)
-    args = parser.parse_args()
-    main(port=args.port)
+    main()
