@@ -1,6 +1,6 @@
 ---
 title: Legacygym Modernization Environment
-emoji: toolbox
+emoji: 🧰
 colorFrom: blue
 colorTo: indigo
 sdk: docker
