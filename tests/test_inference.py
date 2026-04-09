@@ -5,6 +5,7 @@ from openenv.core.client_types import StepResult
 
 from inference import (
     CURATED_TASK_IDS,
+    _resolve_async_result,
     create_run_log_session_dir,
     format_end_line,
     format_start_line,
@@ -42,6 +43,39 @@ class AsyncEnvironmentAdapter:
     async def step(self, action: LegacygymAction):
         observation = self.env.step(action)
         return StepResult(observation=observation, reward=observation.reward, done=observation.done)
+
+    async def close(self):
+        return None
+
+
+class NestedAwaitableEnvironmentAdapter(AsyncEnvironmentAdapter):
+    async def reset(self, **kwargs):
+        async def inner():
+            return await super(NestedAwaitableEnvironmentAdapter, self).reset(**kwargs)
+
+        return inner()
+
+    async def step(self, action: LegacygymAction):
+        async def inner():
+            return await super(NestedAwaitableEnvironmentAdapter, self).step(action)
+
+        return inner()
+
+    async def close(self):
+        async def inner():
+            return None
+
+        return inner()
+
+
+class FailingEnvironmentAdapter:
+    async def reset(self, **kwargs):
+        del kwargs
+        raise RuntimeError("reset failed")
+
+    async def step(self, action: LegacygymAction):
+        del action
+        raise RuntimeError("step should not be called")
 
     async def close(self):
         return None
@@ -107,6 +141,16 @@ def test_create_run_log_session_dir_uses_env_override(tmp_path, monkeypatch):
     assert session_dir.exists()
 
 
+def test_resolve_async_result_unwraps_nested_awaitables():
+    async def inner():
+        return 7
+
+    async def outer():
+        return inner()
+
+    assert asyncio.run(_resolve_async_result(outer())) == 7
+
+
 def test_run_episode_emits_required_log_lines(capsys):
     env = AsyncEnvironmentAdapter(LegacygymEnvironment())
     agent = StaticAgent()
@@ -128,6 +172,53 @@ def test_run_episode_emits_required_log_lines(capsys):
     assert success
     assert steps == len(rewards)
     assert score > 0.9
+
+
+def test_run_episode_handles_nested_awaitables(capsys):
+    env = NestedAwaitableEnvironmentAdapter(LegacygymEnvironment())
+    agent = StaticAgent()
+
+    success, steps, score, rewards = asyncio.run(
+        run_episode(
+            env,
+            agent,
+            task_id="array_length",
+            benchmark_name="legacygym",
+            model_name="test-model",
+        )
+    )
+
+    captured = capsys.readouterr().out.strip().splitlines()
+    assert captured[0].startswith("[START]")
+    assert captured[-1].startswith("[END]")
+    assert success
+    assert steps == len(rewards)
+    assert score > 0.9
+
+
+def test_run_episode_returns_failure_instead_of_raising(capsys, tmp_path):
+    env = FailingEnvironmentAdapter()
+    agent = StaticAgent()
+
+    success, steps, score, rewards = asyncio.run(
+        run_episode(
+            env,
+            agent,
+            task_id="array_length",
+            benchmark_name="legacygym",
+            model_name="test-model",
+            run_log_dir=tmp_path,
+        )
+    )
+
+    captured = capsys.readouterr().out.strip().splitlines()
+    assert captured[0].startswith("[START]")
+    assert captured[-1].startswith("[END]")
+    assert not success
+    assert steps == 0
+    assert score == 0.0
+    assert rewards == []
+    assert (tmp_path / "array_length" / "summary.json").exists()
 
 
 def test_run_tasks_writes_run_logs(tmp_path, capsys):

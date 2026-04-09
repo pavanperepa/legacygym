@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
+import inspect
 import json
 import os
 from pathlib import Path
@@ -238,6 +239,19 @@ def _write_json(path: Path, payload: object) -> None:
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+async def _resolve_async_result(value: object, *, max_depth: int = 5) -> object:
+    """Unwrap awaitables returned by runtime/client layers."""
+
+    depth = 0
+    result = value
+    while inspect.isawaitable(result):
+        result = await result
+        depth += 1
+        if depth > max_depth:
+            raise RuntimeError("Exceeded maximum awaitable resolution depth")
+    return result
+
+
 def _collect_agent_interactions(agent: ModelAgent, task_id: str) -> list[dict[str, str]]:
     interactions = getattr(agent, "interactions", [])
     return [item for item in interactions if item.get("task_id") == task_id]
@@ -299,73 +313,113 @@ async def run_episode(
     success = False
     score = 0.0
     step_records: list[dict[str, object]] = []
-    observation = (await env.reset(task_id=task_id)).observation
-    initial_observation = observation.model_copy(deep=True)
+    initial_observation: LegacygymObservation | None = None
+    observation: LegacygymObservation | None = None
 
-    actions: list[LegacygymAction] = [
-        LegacygymAction(action_type="replace_solution", code=agent.generate_initial_solution(observation))
-    ]
+    try:
+        reset_result = await _resolve_async_result(env.reset(task_id=task_id))
+        observation = reset_result.observation
+        initial_observation = observation.model_copy(deep=True)
 
-    while actions:
-        action = actions.pop(0)
-        result = await env.step(action)
-        step_index += 1
-        observation = result.observation
-        reward = float(result.reward or 0.0)
-        rewards.append(reward)
-        error = observation.attempt.last_error
+        actions: list[LegacygymAction] = [
+            LegacygymAction(
+                action_type="replace_solution",
+                code=agent.generate_initial_solution(observation),
+            )
+        ]
+
+        while actions:
+            action = actions.pop(0)
+            result = await _resolve_async_result(env.step(action))
+            step_index += 1
+            observation = result.observation
+            reward = float(result.reward or 0.0)
+            rewards.append(reward)
+            error = observation.attempt.last_error
+            step_records.append(
+                {
+                    "step": step_index,
+                    "action_type": action.action_type,
+                    "reward": reward,
+                    "done": result.done,
+                    "error": error,
+                    "code": action.code,
+                    "observation": observation.model_dump(mode="json"),
+                }
+            )
+            print(format_step_line(step_index, action.action_type, reward, result.done, error))
+
+            if result.done:
+                score = observation.last_grading.final_score if observation.last_grading else 0.0
+                success = bool(score >= 0.99)
+                break
+
+            if action.action_type == "replace_solution":
+                actions.append(LegacygymAction(action_type="run_visible_tests"))
+                continue
+
+            if action.action_type == "run_visible_tests":
+                last_grading = observation.last_grading
+                remaining_steps = int(observation.metadata.get("remaining_steps", 0))
+                if last_grading and last_grading.visible_passed == last_grading.visible_total:
+                    actions.append(LegacygymAction(action_type="submit"))
+                elif remaining_steps > 1:
+                    actions.append(
+                        LegacygymAction(
+                            action_type="replace_solution",
+                            code=agent.repair_solution(observation),
+                        )
+                    )
+                else:
+                    actions.append(LegacygymAction(action_type="submit"))
+    except Exception as exc:
+        success = False
+        score = 0.0
         step_records.append(
             {
                 "step": step_index,
-                "action_type": action.action_type,
-                "reward": reward,
-                "done": result.done,
-                "error": error,
-                "code": action.code,
-                "observation": observation.model_dump(mode="json"),
+                "action_type": "exception",
+                "reward": 0.0,
+                "done": True,
+                "error": str(exc),
+                "code": None,
+                "observation": observation.model_dump(mode="json") if observation is not None else None,
             }
         )
-        print(format_step_line(step_index, action.action_type, reward, result.done, error))
-
-        if result.done:
-            score = observation.last_grading.final_score if observation.last_grading else 0.0
-            success = bool(score >= 0.99)
-            break
-
-        if action.action_type == "replace_solution":
-            actions.append(LegacygymAction(action_type="run_visible_tests"))
-            continue
-
-        if action.action_type == "run_visible_tests":
-            last_grading = observation.last_grading
-            remaining_steps = int(observation.metadata.get("remaining_steps", 0))
-            if last_grading and last_grading.visible_passed == last_grading.visible_total:
-                actions.append(LegacygymAction(action_type="submit"))
-            elif remaining_steps > 1:
-                actions.append(
-                    LegacygymAction(
-                        action_type="replace_solution",
-                        code=agent.repair_solution(observation),
-                    )
-                )
-            else:
-                actions.append(LegacygymAction(action_type="submit"))
-
-    print(format_end_line(success, step_index, score, rewards))
-    write_task_run_logs(
-        run_log_dir,
-        task_id=task_id,
-        benchmark_name=benchmark_name,
-        model_name=model_name,
-        success=success,
-        steps=step_index,
-        score=score,
-        rewards=rewards,
-        initial_observation=initial_observation,
-        final_observation=observation,
-        step_records=step_records,
-        agent=agent,
-    )
+    finally:
+        print(format_end_line(success, step_index, score, rewards))
+        if initial_observation is not None and observation is not None:
+            write_task_run_logs(
+                run_log_dir,
+                task_id=task_id,
+                benchmark_name=benchmark_name,
+                model_name=model_name,
+                success=success,
+                steps=step_index,
+                score=score,
+                rewards=rewards,
+                initial_observation=initial_observation,
+                final_observation=observation,
+                step_records=step_records,
+                agent=agent,
+            )
+        elif run_log_dir is not None:
+            task_dir = run_log_dir / task_id
+            task_dir.mkdir(parents=True, exist_ok=True)
+            _write_json(
+                task_dir / "summary.json",
+                {
+                    "task_id": task_id,
+                    "benchmark_name": benchmark_name,
+                    "model_name": model_name,
+                    "success": success,
+                    "steps": step_index,
+                    "score": score,
+                    "rewards": rewards,
+                    "error": step_records[-1]["error"] if step_records else "unknown error",
+                },
+            )
+            _write_json(task_dir / "steps.json", step_records)
     return success, step_index, score, rewards
 
 
@@ -424,7 +478,7 @@ async def main() -> None:
             run_log_dir=run_log_dir,
         )
     finally:
-        await env.close()
+        await _resolve_async_result(env.close())
 
 
 if __name__ == "__main__":

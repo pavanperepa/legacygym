@@ -19,6 +19,22 @@ Legacygym is an OpenEnv-compatible benchmark for iterative COBOL-to-Python moder
 
 The environment is intentionally lightweight and deterministic. It does not execute COBOL. It executes only agent-generated Python inside a controlled runner and scores correctness, maintainability, and safe behavior.
 
+## Current Status
+
+- The current baseline includes:
+  - typed environment contracts
+  - deterministic execution and grading
+  - 3 curated Rosetta-backed tasks
+  - multi-step agent actions
+  - root-level `inference.py`
+  - root-level `Dockerfile`
+  - local run artifacts under `run_logs/`
+- The current curated tasks are:
+  - `array_length`
+  - `tokenize_with_escaping`
+  - `word_frequency`
+- The baseline currently runs all curated tasks in sequence by default.
+
 ## Tasks
 
 V1 ships three fixed Rosetta-backed tasks with increasing difficulty:

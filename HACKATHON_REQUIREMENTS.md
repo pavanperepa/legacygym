@@ -11,6 +11,21 @@ API.
 
 This environment must simulate a real-world task, not a toy problem or game.
 
+## Current Status
+
+- The environment now implements:
+  - `reset()`
+  - `step()`
+  - `state()`
+- The current task set includes 3 graded tasks:
+  - `array_length`
+  - `tokenize_with_escaping`
+  - `word_frequency`
+- Deterministic grading, controlled execution, and a minimal reward adapter are implemented.
+- A root-level `inference.py` exists and currently runs all curated tasks in sequence by default.
+- A root-level `Dockerfile` exists for deployment.
+- Local execution artifacts are written under `run_logs/`.
+
 ---
 
 ## Required Functional Features

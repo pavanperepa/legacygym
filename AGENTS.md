@@ -12,6 +12,32 @@ The environment focuses on COBOL-to-Python migration as an agent task:
 
 This repo is not a production migration platform. It is an evaluation/training environment for agents.
 
+## Current Status
+
+- The original echo environment has been replaced with a COBOL-to-Python modernization environment.
+- The current implementation includes:
+  - typed models in `models.py`
+  - main environment loop in `server/environment.py`
+  - internal state in `server/state.py`
+  - task registry in `server/task_registry.py`
+  - curated tasks in `server/tasks/`
+  - graders in `server/graders/`
+  - controlled execution runner in `server/execution/runner.py`
+  - root-level baseline runner in `inference.py`
+- The current curated tasks are:
+  - `array_length`
+  - `tokenize_with_escaping`
+  - `word_frequency`
+- The baseline currently runs all curated tasks in sequence by default.
+- Local run artifacts are written under `run_logs/`.
+
+## Learned Notes
+
+- Local success is not sufficient; keep submission/evaluator compatibility as a separate check.
+- `inference.py` should tolerate client/runtime layers that return nested awaitables.
+- `inference.py` must fail gracefully and still emit the required `[END]` line.
+- Keep debug artifacts in files under `run_logs/`, not in stdout.
+
 ---
 
 ## Read Order
