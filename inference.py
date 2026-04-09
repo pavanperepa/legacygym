@@ -1,0 +1,431 @@
+"""Baseline inference loop for the Legacygym modernization environment."""
+
+from __future__ import annotations
+
+import asyncio
+from datetime import datetime
+import json
+import os
+from pathlib import Path
+import re
+from typing import Protocol
+
+from openai import OpenAI
+
+from legacygym import LegacygymAction, LegacygymEnv, LegacygymObservation
+
+CURATED_TASK_IDS = ["array_length", "tokenize_with_escaping", "word_frequency"]
+
+
+class ModelAgent(Protocol):
+    """Small interface for the baseline code generator."""
+
+    def generate_initial_solution(self, observation: LegacygymObservation) -> str:
+        ...
+
+    def repair_solution(self, observation: LegacygymObservation) -> str:
+        ...
+
+
+def _is_openai_base_url(base_url: str | None) -> bool:
+    if not base_url:
+        return False
+    normalized = base_url.strip().lower()
+    return "api.openai.com" in normalized or normalized.endswith("/openai/v1")
+
+
+def load_dotenv(path: str | os.PathLike[str] = ".env", *, override: bool = False) -> None:
+    """Load simple KEY=VALUE pairs from a local .env file."""
+
+    dotenv_path = Path(path)
+    if not dotenv_path.exists():
+        return
+
+    for raw_line in dotenv_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        if override or key not in os.environ:
+            os.environ[key] = value
+
+
+def _sanitize_log_value(value: str | None) -> str:
+    if not value:
+        return "null"
+    return value.replace("\r", "\\r").replace("\n", "\\n")
+
+
+def format_start_line(task_name: str, benchmark: str, model_name: str) -> str:
+    return f"[START] task={task_name} env={benchmark} model={model_name}"
+
+
+def format_step_line(step: int, action: str, reward: float, done: bool, error: str | None) -> str:
+    return (
+        f"[STEP] step={step} action={action} reward={reward:.2f} "
+        f"done={str(done).lower()} error={_sanitize_log_value(error)}"
+    )
+
+
+def format_end_line(success: bool, steps: int, score: float, rewards: list[float]) -> str:
+    reward_blob = ",".join(f"{reward:.2f}" for reward in rewards)
+    return (
+        f"[END] success={str(success).lower()} steps={steps} "
+        f"score={score:.4f} rewards={reward_blob}"
+    )
+
+
+def _strip_code_fences(text: str) -> str:
+    fenced = re.findall(r"```(?:python)?\n(.*?)```", text, flags=re.DOTALL)
+    if fenced:
+        return fenced[0].strip()
+    return text.strip()
+
+
+def resolve_api_credentials() -> tuple[str | None, str]:
+    """Pick the correct auth token for the configured provider."""
+
+    base_url = os.getenv("API_BASE_URL")
+    hf_token = os.getenv("HF_TOKEN")
+    api_key = os.getenv("API_KEY")
+    openai_api_key = os.getenv("OPENAI_API_KEY")
+
+    if _is_openai_base_url(base_url):
+        selected = openai_api_key or api_key
+        if selected:
+            return base_url, selected
+        if hf_token:
+            raise RuntimeError(
+                "API_BASE_URL points to OpenAI, but only HF_TOKEN is set. "
+                "Set API_KEY or OPENAI_API_KEY for direct OpenAI usage."
+            )
+        raise RuntimeError(
+            "API_KEY or OPENAI_API_KEY is required when API_BASE_URL points to OpenAI."
+        )
+
+    selected = hf_token or api_key or openai_api_key
+    if selected:
+        return base_url, selected
+    raise RuntimeError(
+        "Missing model auth. Set HF_TOKEN for submission-style/HF-compatible endpoints, "
+        "or API_KEY/OPENAI_API_KEY for direct OpenAI usage."
+    )
+
+
+def _render_task_prompt(observation: LegacygymObservation) -> str:
+    examples = "\n".join(
+        f"- {example.name}: input={example.input_summary} expected={example.expected_summary}"
+        for example in observation.task.visible_examples
+    )
+    return (
+        f"Task: {observation.task.task_name}\n"
+        f"Difficulty: {observation.task.difficulty}\n"
+        f"Summary: {observation.task.summary}\n"
+        f"Function signature: {observation.task.python_function_signature}\n"
+        f"Visible examples:\n{examples}\n\n"
+        f"COBOL source:\n{observation.task.cobol_source}\n"
+    )
+
+
+def _render_feedback(observation: LegacygymObservation) -> str:
+    feedback = []
+    if observation.last_execution and observation.last_execution.error:
+        feedback.append(f"Execution error: {observation.last_execution.error}")
+    if observation.last_grading and observation.last_grading.feedback:
+        feedback.extend(f"Grader feedback: {item}" for item in observation.last_grading.feedback)
+    if observation.last_grading:
+        feedback.append(
+            "Visible progress: "
+            f"{observation.last_grading.visible_passed}/{observation.last_grading.visible_total}"
+        )
+    return "\n".join(feedback) or "No feedback yet."
+
+
+class OpenAIModelAgent:
+    """Deterministic prompting wrapper over the OpenAI client."""
+
+    def __init__(self, client: OpenAI, model_name: str):
+        self.client = client
+        self.model_name = model_name
+        self.interactions: list[dict[str, str]] = []
+
+    def _complete(self, prompt: str, *, kind: str, task_id: str) -> str:
+        response = self.client.chat.completions.create(
+            model=self.model_name,
+            temperature=0,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are migrating legacy COBOL logic into a single Python function. "
+                        "Return only valid Python source code with no markdown."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+        )
+        completion = _strip_code_fences(response.choices[0].message.content or "")
+        self.interactions.append(
+            {
+                "kind": kind,
+                "task_id": task_id,
+                "prompt": prompt,
+                "response": completion,
+            }
+        )
+        return completion
+
+    def generate_initial_solution(self, observation: LegacygymObservation) -> str:
+        prompt = (
+            _render_task_prompt(observation)
+            + "\nWrite the full Python module now. Define exactly the requested function."
+        )
+        return self._complete(prompt, kind="initial", task_id=observation.task.task_id)
+
+    def repair_solution(self, observation: LegacygymObservation) -> str:
+        prompt = (
+            _render_task_prompt(observation)
+            + "\nCurrent candidate:\n"
+            + observation.current_code
+            + "\n\nRepair the module based on this feedback:\n"
+            + _render_feedback(observation)
+            + "\nReturn the full corrected Python module."
+        )
+        return self._complete(prompt, kind="repair", task_id=observation.task.task_id)
+
+
+def create_model_agent() -> OpenAIModelAgent:
+    base_url, api_key = resolve_api_credentials()
+    client = OpenAI(base_url=base_url, api_key=api_key)
+    return OpenAIModelAgent(client=client, model_name=os.getenv("MODEL_NAME", "unknown-model"))
+
+
+def create_environment() -> LegacygymEnv:
+    env_base_url = os.getenv("ENV_BASE_URL")
+    if env_base_url:
+        return LegacygymEnv(base_url=env_base_url)
+    image_name = os.getenv("IMAGE_NAME")
+    if image_name:
+        return LegacygymEnv.from_docker_image(image_name)
+    return LegacygymEnv(base_url="http://127.0.0.1:8000")
+
+
+def resolve_task_ids() -> list[str]:
+    """Resolve which curated tasks to run for the current invocation."""
+
+    raw_value = os.getenv("TASK_NAME", "all").strip()
+    if not raw_value or raw_value.lower() in {"all", "*"}:
+        return list(CURATED_TASK_IDS)
+    return [item.strip() for item in raw_value.split(",") if item.strip()]
+
+
+def create_run_log_session_dir() -> Path | None:
+    """Create a timestamped local run-log directory unless disabled."""
+
+    raw_dir = os.getenv("RUN_LOG_DIR", "run_logs").strip()
+    if not raw_dir:
+        return None
+    session_dir = Path(raw_dir) / datetime.now().strftime("run_%Y%m%d_%H%M%S")
+    session_dir.mkdir(parents=True, exist_ok=True)
+    return session_dir
+
+
+def _write_json(path: Path, payload: object) -> None:
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _collect_agent_interactions(agent: ModelAgent, task_id: str) -> list[dict[str, str]]:
+    interactions = getattr(agent, "interactions", [])
+    return [item for item in interactions if item.get("task_id") == task_id]
+
+
+def write_task_run_logs(
+    session_dir: Path | None,
+    *,
+    task_id: str,
+    benchmark_name: str,
+    model_name: str,
+    success: bool,
+    steps: int,
+    score: float,
+    rewards: list[float],
+    initial_observation: LegacygymObservation,
+    final_observation: LegacygymObservation,
+    step_records: list[dict[str, object]],
+    agent: ModelAgent,
+) -> None:
+    """Persist detailed per-task artifacts for local inspection."""
+
+    if session_dir is None:
+        return
+
+    task_dir = session_dir / task_id
+    task_dir.mkdir(parents=True, exist_ok=True)
+    _write_json(
+        task_dir / "summary.json",
+        {
+            "task_id": task_id,
+            "benchmark_name": benchmark_name,
+            "model_name": model_name,
+            "success": success,
+            "steps": steps,
+            "score": score,
+            "rewards": rewards,
+        },
+    )
+    _write_json(task_dir / "initial_observation.json", initial_observation.model_dump(mode="json"))
+    _write_json(task_dir / "final_observation.json", final_observation.model_dump(mode="json"))
+    _write_json(task_dir / "steps.json", step_records)
+    _write_json(task_dir / "agent_interactions.json", _collect_agent_interactions(agent, task_id))
+    (task_dir / "final_candidate.py").write_text(final_observation.current_code, encoding="utf-8")
+
+
+async def run_episode(
+    env: LegacygymEnv,
+    agent: ModelAgent,
+    *,
+    task_id: str,
+    benchmark_name: str,
+    model_name: str,
+    run_log_dir: Path | None = None,
+) -> tuple[bool, int, float, list[float]]:
+    print(format_start_line(task_id, benchmark_name, model_name))
+    rewards: list[float] = []
+    step_index = 0
+    success = False
+    score = 0.0
+    step_records: list[dict[str, object]] = []
+    observation = (await env.reset(task_id=task_id)).observation
+    initial_observation = observation.model_copy(deep=True)
+
+    actions: list[LegacygymAction] = [
+        LegacygymAction(action_type="replace_solution", code=agent.generate_initial_solution(observation))
+    ]
+
+    while actions:
+        action = actions.pop(0)
+        result = await env.step(action)
+        step_index += 1
+        observation = result.observation
+        reward = float(result.reward or 0.0)
+        rewards.append(reward)
+        error = observation.attempt.last_error
+        step_records.append(
+            {
+                "step": step_index,
+                "action_type": action.action_type,
+                "reward": reward,
+                "done": result.done,
+                "error": error,
+                "code": action.code,
+                "observation": observation.model_dump(mode="json"),
+            }
+        )
+        print(format_step_line(step_index, action.action_type, reward, result.done, error))
+
+        if result.done:
+            score = observation.last_grading.final_score if observation.last_grading else 0.0
+            success = bool(score >= 0.99)
+            break
+
+        if action.action_type == "replace_solution":
+            actions.append(LegacygymAction(action_type="run_visible_tests"))
+            continue
+
+        if action.action_type == "run_visible_tests":
+            last_grading = observation.last_grading
+            remaining_steps = int(observation.metadata.get("remaining_steps", 0))
+            if last_grading and last_grading.visible_passed == last_grading.visible_total:
+                actions.append(LegacygymAction(action_type="submit"))
+            elif remaining_steps > 1:
+                actions.append(
+                    LegacygymAction(
+                        action_type="replace_solution",
+                        code=agent.repair_solution(observation),
+                    )
+                )
+            else:
+                actions.append(LegacygymAction(action_type="submit"))
+
+    print(format_end_line(success, step_index, score, rewards))
+    write_task_run_logs(
+        run_log_dir,
+        task_id=task_id,
+        benchmark_name=benchmark_name,
+        model_name=model_name,
+        success=success,
+        steps=step_index,
+        score=score,
+        rewards=rewards,
+        initial_observation=initial_observation,
+        final_observation=observation,
+        step_records=step_records,
+        agent=agent,
+    )
+    return success, step_index, score, rewards
+
+
+async def run_tasks(
+    env: LegacygymEnv,
+    agent: ModelAgent,
+    *,
+    task_ids: list[str],
+    benchmark_name: str,
+    model_name: str,
+    run_log_dir: Path | None = None,
+) -> list[dict[str, object]]:
+    """Run a sequence of tasks and return aggregate results."""
+
+    results: list[dict[str, object]] = []
+    for task_id in task_ids:
+        success, steps, score, rewards = await run_episode(
+            env,
+            agent,
+            task_id=task_id,
+            benchmark_name=benchmark_name,
+            model_name=model_name,
+            run_log_dir=run_log_dir,
+        )
+        results.append(
+            {
+                "task_id": task_id,
+                "success": success,
+                "steps": steps,
+                "score": score,
+                "rewards": rewards,
+            }
+        )
+
+    if run_log_dir is not None:
+        _write_json(run_log_dir / "aggregate_summary.json", results)
+
+    return results
+
+
+async def main() -> None:
+    load_dotenv()
+    env = create_environment()
+    agent = create_model_agent()
+    task_ids = resolve_task_ids()
+    benchmark_name = os.getenv("BENCHMARK_NAME", "legacygym")
+    model_name = os.getenv("MODEL_NAME", "unknown-model")
+    run_log_dir = create_run_log_session_dir()
+    try:
+        await run_tasks(
+            env,
+            agent,
+            task_ids=task_ids,
+            benchmark_name=benchmark_name,
+            model_name=model_name,
+            run_log_dir=run_log_dir,
+        )
+    finally:
+        await env.close()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

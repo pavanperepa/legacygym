@@ -1,6 +1,6 @@
 ---
-title: Legacygym Environment Server
-emoji: 🥋
+title: Legacygym Modernization Environment
+emoji: toolbox
 colorFrom: blue
 colorTo: indigo
 sdk: docker
@@ -9,247 +9,204 @@ app_port: 8000
 base_path: /web
 tags:
   - openenv
+  - modernization
+  - cobol
 ---
 
-# Legacygym Environment
+# Legacygym Modernization Environment
 
-A simple test environment that echoes back messages. Perfect for testing the env APIs as well as demonstrating environment usage patterns.
+Legacygym is an OpenEnv-compatible benchmark for iterative COBOL-to-Python modernization. Each episode gives an agent legacy COBOL source, a normalized Python function contract, visible examples, and a small action space for drafting, testing, and submitting code.
 
-## Quick Start
+The environment is intentionally lightweight and deterministic. It does not execute COBOL. It executes only agent-generated Python inside a controlled runner and scores correctness, maintainability, and safe behavior.
 
-The simplest way to use the Legacygym environment is through the `LegacygymEnv` class:
+## Tasks
+
+V1 ships three fixed Rosetta-backed tasks with increasing difficulty:
+
+- `array_length` (`easy`): return the number of elements in a list.
+- `tokenize_with_escaping` (`medium`): split on unescaped separators while preserving escaped characters.
+- `word_frequency` (`hard`): normalize text, count words, and return the top `n` items with deterministic tie-breaking.
+
+The dataset source is [rosetta-code-task-comparisons.json](/c:/Users/pavan/openenv-rl-gym/legacygym/rosetta-code-task-comparisons.json). The paired Python snippets are used only as reference material while authoring tasks and tests; the runtime baseline does not use them as direct answers.
+
+## Action Space
+
+`LegacygymAction` supports exactly three actions:
+
+- `replace_solution`: provide the full candidate Python module in `code`.
+- `run_visible_tests`: execute only visible tests for the stored candidate.
+- `submit`: run full grading and end the episode.
+
+## Observation Space
+
+`LegacygymObservation` includes:
+
+- `task`: task id, difficulty, migration summary, COBOL source, function signature, and visible examples.
+- `attempt`: whether code exists, code size, last action, and last error.
+- `current_code`: the currently stored Python module.
+- `last_execution`: latest runner result, including status and error.
+- `last_grading`: latest grading summary, including visible/hidden counts and normalized scores.
+- `reward_breakdown`: minimal pluggable reward terms for the most recent transition.
+
+`state()` returns the same episode context plus internal progress fields such as `step_count`, `best_visible_score`, and `done`.
+
+## Reward And Scoring
+
+Deterministic grading is the primary contract:
+
+- correctness comes from visible and hidden tests,
+- maintainability comes from static checks on the target function,
+- safety comes from AST preflight and controlled execution outcomes.
+
+The final task score is normalized to `[0, 1]`.
+
+RL reward shaping is intentionally minimal in v1 and isolated behind a reward adapter:
+
+- small negative reward for invalid or unsafe code,
+- small positive reward when visible test pass rate improves,
+- final reward on termination from the normalized task score.
+
+## Inference Compatibility
+
+The root-level [inference.py](/c:/Users/pavan/openenv-rl-gym/legacygym/inference.py) follows the required evaluator control flow:
+
+1. create an OpenAI client from `API_BASE_URL` and `HF_TOKEN` or `API_KEY`,
+2. create the environment from `IMAGE_NAME`, `ENV_BASE_URL`, or a local default URL,
+3. call `await env.reset(...)`,
+4. call `await env.step(...)` in a loop,
+5. call `await env.close()` in `finally`.
+
+Supported environment variables:
+
+- `API_BASE_URL`
+- `MODEL_NAME`
+- `HF_TOKEN`
+- `API_KEY`
+- `OPENAI_API_KEY`
+- `IMAGE_NAME`
+- `ENV_BASE_URL`
+- `TASK_NAME`
+- `BENCHMARK_NAME`
+- `RUN_LOG_DIR`
+
+`inference.py` automatically loads a root-level `.env` file before reading these variables.
+
+Auth selection follows the submission requirements without breaking direct OpenAI usage:
+
+- if `API_BASE_URL` points at an OpenAI endpoint, `OPENAI_API_KEY` or `API_KEY` is used
+- otherwise, `HF_TOKEN` is preferred and `API_KEY` is the fallback
+
+That keeps evaluator compatibility for Hugging Face-style submission flows while avoiding accidental use of an `hf_...` token against `https://api.openai.com/v1`.
+
+The script emits strict evaluator-compatible stdout:
+
+```text
+[START] task=<task_name> env=<benchmark> model=<model_name>
+[STEP] step=<n> action=<action_str> reward=<0.00> done=<true|false> error=<msg|null>
+[END] success=<true|false> steps=<n> score=<score> rewards=<r1,r2,...,rn>
+```
+
+By default, `inference.py` runs all three curated tasks in sequence. To narrow the run, set `TASK_NAME` to one task id or a comma-separated list such as `array_length,word_frequency`.
+
+Detailed local artifacts are written under `run_logs/` by default, with one subdirectory per task plus an `aggregate_summary.json` file. Set `RUN_LOG_DIR` to change the output location, or set it to an empty string to disable file artifacts.
+
+## Running Locally
+
+Install dependencies:
+
+```bash
+uv sync
+```
+
+Run the server:
+
+```bash
+uvicorn server.app:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Interact from Python:
 
 ```python
+import asyncio
+
 from legacygym import LegacygymAction, LegacygymEnv
 
-try:
-    # Create environment from Docker image
-    legacygymenv = LegacygymEnv.from_docker_image("legacygym-env:latest")
 
-    # Reset
-    result = legacygymenv.reset()
-    print(f"Reset: {result.observation.echoed_message}")
+async def main() -> None:
+    env = LegacygymEnv(base_url="http://127.0.0.1:8000")
+    try:
+        reset = await env.reset(task_id="array_length")
+        print(reset.observation.task.task_name)
 
-    # Send multiple messages
-    messages = ["Hello, World!", "Testing echo", "Final message"]
+        result = await env.step(
+            LegacygymAction(
+                action_type="replace_solution",
+                code=\"\"\"def array_length(items: list[str]) -> int:
+    \"\"\"Return the number of items.\"\"\"
+    return len(items)
+\"\"\",
+            )
+        )
+        print(result.observation.attempt.last_error)
 
-    for msg in messages:
-        result = legacygymenv.step(LegacygymAction(message=msg))
-        print(f"Sent: '{msg}'")
-        print(f"  → Echoed: '{result.observation.echoed_message}'")
-        print(f"  → Length: {result.observation.message_length}")
-        print(f"  → Reward: {result.reward}")
+        result = await env.step(LegacygymAction(action_type="run_visible_tests"))
+        print(result.observation.last_grading.visible_passed)
 
-finally:
-    # Always clean up
-    legacygymenv.close()
+        result = await env.step(LegacygymAction(action_type="submit"))
+        print(result.reward, result.observation.last_grading.final_score)
+    finally:
+        await env.close()
+
+
+asyncio.run(main())
 ```
 
-That's it! The `LegacygymEnv.from_docker_image()` method handles:
-- Starting the Docker container
-- Waiting for the server to be ready
-- Connecting to the environment
-- Container cleanup when you call `close()`
-
-## Building the Docker Image
-
-Before using the environment, you need to build the Docker image:
+Run the baseline inference loop:
 
 ```bash
-# From project root
-docker build -t legacygym-env:latest -f server/Dockerfile .
+@"
+API_BASE_URL=https://api.openai.com/v1
+MODEL_NAME=your-model
+API_KEY=sk-...
+TASK_NAME=all
+RUN_LOG_DIR=run_logs
+# Optional:
+# ENV_BASE_URL=http://127.0.0.1:8000
+# IMAGE_NAME=legacygym-env:latest
+"@ | Set-Content .env
+
+python inference.py
 ```
 
-## Deploying to Hugging Face Spaces
+For submission-style or HF-compatible routers, use:
 
-You can easily deploy your OpenEnv environment to Hugging Face Spaces using the `openenv push` command:
+```dotenv
+API_BASE_URL=https://your-router/v1
+MODEL_NAME=your-model
+HF_TOKEN=hf_...
+TASK_NAME=all
+```
+
+## Docker
+
+Build the root-level Docker image:
 
 ```bash
-# From the environment directory (where openenv.yaml is located)
-openenv push
-
-# Or specify options
-openenv push --namespace my-org --private
+docker build -t legacygym-env:latest .
 ```
 
-The `openenv push` command will:
-1. Validate that the directory is an OpenEnv environment (checks for `openenv.yaml`)
-2. Prepare a custom build for Hugging Face Docker space (enables web interface)
-3. Upload to Hugging Face (ensuring you're logged in)
-
-### Prerequisites
-
-- Authenticate with Hugging Face: The command will prompt for login if not already authenticated
-
-### Options
-
-- `--directory`, `-d`: Directory containing the OpenEnv environment (defaults to current directory)
-- `--repo-id`, `-r`: Repository ID in format 'username/repo-name' (defaults to 'username/env-name' from openenv.yaml)
-- `--base-image`, `-b`: Base Docker image to use (overrides Dockerfile FROM)
-- `--private`: Deploy the space as private (default: public)
-
-### Examples
+Run it:
 
 ```bash
-# Push to your personal namespace (defaults to username/env-name from openenv.yaml)
-openenv push
-
-# Push to a specific repository
-openenv push --repo-id my-org/my-env
-
-# Push with a custom base image
-openenv push --base-image ghcr.io/meta-pytorch/openenv-base:latest
-
-# Push as a private space
-openenv push --private
-
-# Combine options
-openenv push --repo-id my-org/my-env --base-image custom-base:latest --private
+docker run --rm -p 8000:8000 legacygym-env:latest
 ```
 
-After deployment, your space will be available at:
-`https://huggingface.co/spaces/<repo-id>`
+## Testing
 
-The deployed space includes:
-- **Web Interface** at `/web` - Interactive UI for exploring the environment
-- **API Documentation** at `/docs` - Full OpenAPI/Swagger interface
-- **Health Check** at `/health` - Container health monitoring
-- **WebSocket** at `/ws` - Persistent session endpoint for low-latency interactions
-
-## Environment Details
-
-### Action
-**LegacygymAction**: Contains a single field
-- `message` (str) - The message to echo back
-
-### Observation
-**LegacygymObservation**: Contains the echo response and metadata
-- `echoed_message` (str) - The message echoed back
-- `message_length` (int) - Length of the message
-- `reward` (float) - Reward based on message length (length × 0.1)
-- `done` (bool) - Always False for echo environment
-- `metadata` (dict) - Additional info like step count
-
-### Reward
-The reward is calculated as: `message_length × 0.1`
-- "Hi" → reward: 0.2
-- "Hello, World!" → reward: 1.3
-- Empty message → reward: 0.0
-
-## Advanced Usage
-
-### Connecting to an Existing Server
-
-If you already have a Legacygym environment server running, you can connect directly:
-
-```python
-from legacygym import LegacygymEnv
-
-# Connect to existing server
-legacygymenv = LegacygymEnv(base_url="<ENV_HTTP_URL_HERE>")
-
-# Use as normal
-result = legacygymenv.reset()
-result = legacygymenv.step(LegacygymAction(message="Hello!"))
-```
-
-Note: When connecting to an existing server, `legacygymenv.close()` will NOT stop the server.
-
-### Using the Context Manager
-
-The client supports context manager usage for automatic connection management:
-
-```python
-from legacygym import LegacygymAction, LegacygymEnv
-
-# Connect with context manager (auto-connects and closes)
-with LegacygymEnv(base_url="http://localhost:8000") as env:
-    result = env.reset()
-    print(f"Reset: {result.observation.echoed_message}")
-    # Multiple steps with low latency
-    for msg in ["Hello", "World", "!"]:
-        result = env.step(LegacygymAction(message=msg))
-        print(f"Echoed: {result.observation.echoed_message}")
-```
-
-The client uses WebSocket connections for:
-- **Lower latency**: No HTTP connection overhead per request
-- **Persistent session**: Server maintains your environment state
-- **Efficient for episodes**: Better for many sequential steps
-
-### Concurrent WebSocket Sessions
-
-The server supports multiple concurrent WebSocket connections. To enable this,
-modify `server/app.py` to use factory mode:
-
-```python
-# In server/app.py - use factory mode for concurrent sessions
-app = create_app(
-    LegacygymEnvironment,  # Pass class, not instance
-    LegacygymAction,
-    LegacygymObservation,
-    max_concurrent_envs=4,  # Allow 4 concurrent sessions
-)
-```
-
-Then multiple clients can connect simultaneously:
-
-```python
-from legacygym import LegacygymAction, LegacygymEnv
-from concurrent.futures import ThreadPoolExecutor
-
-def run_episode(client_id: int):
-    with LegacygymEnv(base_url="http://localhost:8000") as env:
-        result = env.reset()
-        for i in range(10):
-            result = env.step(LegacygymAction(message=f"Client {client_id}, step {i}"))
-        return client_id, result.observation.message_length
-
-# Run 4 episodes concurrently
-with ThreadPoolExecutor(max_workers=4) as executor:
-    results = list(executor.map(run_episode, range(4)))
-```
-
-## Development & Testing
-
-### Direct Environment Testing
-
-Test the environment logic directly without starting the HTTP server:
+Run the test suite:
 
 ```bash
-# From the server directory
-python3 server/legacygym_environment.py
+.venv\Scripts\python.exe -m pytest
 ```
 
-This verifies that:
-- Environment resets correctly
-- Step executes actions properly
-- State tracking works
-- Rewards are calculated correctly
-
-### Running Locally
-
-Run the server locally for development:
-
-```bash
-uvicorn server.app:app --reload
-```
-
-## Project Structure
-
-```
-legacygym/
-├── .dockerignore         # Docker build exclusions
-├── __init__.py            # Module exports
-├── README.md              # This file
-├── openenv.yaml           # OpenEnv manifest
-├── pyproject.toml         # Project metadata and dependencies
-├── uv.lock                # Locked dependencies (generated)
-├── client.py              # LegacygymEnv client
-├── models.py              # Action and Observation models
-└── server/
-    ├── __init__.py        # Server module exports
-    ├── legacygym_environment.py  # Core environment logic
-    ├── app.py             # FastAPI application (HTTP + WebSocket endpoints)
-    └── Dockerfile         # Container image definition
-```
+The tests cover dataset loading, the execution runner, task graders, reward adaptation, environment flow, and inference log formatting.
