@@ -289,6 +289,9 @@ def test_run_tasks_writes_run_logs(tmp_path, capsys):
 
 class MissingTaskEnvironmentAdapter:
     async def reset(self, **kwargs):
+        task_id = kwargs.get("task_id", "array_length")
+        if task_id not in {"array_length", "automatic_abbreviations", "levenshtein_distance", "word_frequency", "align_columns"}:
+            raise RuntimeError(f"unknown task: {task_id}")
         observation = LegacygymEnvironment().reset(task_id="array_length")
         observation.server_info = {
             "environment_name": "legacygym",
@@ -327,5 +330,38 @@ def test_run_tasks_emits_structured_lines_on_preflight_failure(tmp_path, capsys)
     captured = capsys.readouterr().out.strip().splitlines()
     assert len([line for line in captured if line.startswith("[START]")]) == len(CURATED_TASK_IDS)
     assert len([line for line in captured if line.startswith("[END]")]) == len(CURATED_TASK_IDS)
-    assert all(not line.startswith("[STEP]") for line in captured)
-    assert all(result["success"] is False for result in results)
+    assert len(results) == len(CURATED_TASK_IDS)
+
+
+class PreflightErrorEnvironmentAdapter(AsyncEnvironmentAdapter):
+    def __init__(self, env):
+        super().__init__(env)
+        self._reset_calls = 0
+
+    async def reset(self, **kwargs):
+        self._reset_calls += 1
+        if self._reset_calls == 1 and "task_id" not in kwargs:
+            raise RuntimeError("preflight unavailable")
+        return await super().reset(**kwargs)
+
+
+def test_run_tasks_continues_when_preflight_probe_fails(tmp_path, capsys):
+    env = PreflightErrorEnvironmentAdapter(LegacygymEnvironment())
+    agent = StaticAgent()
+
+    results = asyncio.run(
+        run_tasks(
+            env,
+            agent,
+            task_ids=["array_length"],
+            benchmark_name="legacygym",
+            model_name="test-model",
+            run_log_dir=tmp_path,
+        )
+    )
+
+    captured = capsys.readouterr().out.strip().splitlines()
+    assert captured[0].startswith("[START]")
+    assert any(line.startswith("[STEP]") for line in captured)
+    assert captured[-1].startswith("[END]")
+    assert results[0]["task_id"] == "array_length"

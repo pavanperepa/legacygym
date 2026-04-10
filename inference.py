@@ -493,10 +493,29 @@ async def run_tasks(
 ) -> list[dict[str, object]]:
     """Run a sequence of tasks and return aggregate results."""
 
-    server_metadata = await probe_server_metadata(env)
-    missing_task_ids = validate_server_task_ids(
-        expected_task_ids=task_ids,
-        available_task_ids=list(server_metadata.get("available_task_ids", [])),
+    server_metadata: dict[str, object]
+    try:
+        server_metadata = await probe_server_metadata(env)
+    except Exception as exc:
+        server_metadata = {
+            "environment_name": benchmark_name,
+            "environment_version": None,
+            "registry_signature": None,
+            "available_task_ids": [],
+            "reward_weights": {},
+            "score_weights": {},
+            "runner_timeout_s": None,
+            "preflight_error": str(exc),
+        }
+
+    available_task_ids = list(server_metadata.get("available_task_ids", []))
+    missing_task_ids = (
+        validate_server_task_ids(
+            expected_task_ids=task_ids,
+            available_task_ids=available_task_ids,
+        )
+        if available_task_ids
+        else []
     )
 
     if run_log_dir is not None:
@@ -510,29 +529,6 @@ async def run_tasks(
         )
 
     results: list[dict[str, object]] = []
-    if missing_task_ids:
-        error = (
-            "Connected server does not expose all requested tasks: "
-            + ", ".join(missing_task_ids)
-        )
-        for task_id in task_ids:
-            emit_structured_line(format_start_line(task_id, benchmark_name, model_name))
-            emit_structured_line(format_end_line(False, 0, 0.0, []))
-        results = [
-            {
-                "task_id": task_id,
-                "success": False,
-                "steps": 0,
-                "score": 0.0,
-                "rewards": [],
-                "error": error,
-            }
-            for task_id in task_ids
-        ]
-        if run_log_dir is not None:
-            _write_json(run_log_dir / "aggregate_summary.json", results)
-        return results
-
     for task_id in task_ids:
         success, steps, score, rewards = await run_episode(
             env,
@@ -550,6 +546,7 @@ async def run_tasks(
                 "score": score,
                 "rewards": rewards,
                 "server_metadata": server_metadata,
+                "preflight_missing_task_ids": missing_task_ids,
             }
         )
 
