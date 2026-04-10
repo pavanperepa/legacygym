@@ -107,6 +107,9 @@ def resolve_api_credentials() -> tuple[str | None, str]:
     api_key = os.getenv("API_KEY")
     openai_api_key = os.getenv("OPENAI_API_KEY")
 
+    if base_url and api_key:
+        return base_url, api_key
+
     if _is_openai_base_url(base_url):
         selected = openai_api_key or api_key
         if selected:
@@ -120,7 +123,7 @@ def resolve_api_credentials() -> tuple[str | None, str]:
             "API_KEY or OPENAI_API_KEY is required when API_BASE_URL points to OpenAI."
         )
 
-    selected = hf_token or api_key or openai_api_key
+    selected = hf_token or openai_api_key or api_key
     if selected:
         return base_url, selected
     raise RuntimeError(

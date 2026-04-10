@@ -122,10 +122,22 @@ def test_resolve_api_credentials_prefers_openai_key_for_openai_base_url(monkeypa
     assert api_key == "openai-key"
 
 
-def test_resolve_api_credentials_prefers_hf_token_for_non_openai_base_url(monkeypatch):
+def test_resolve_api_credentials_prefers_api_key_for_configured_proxy(monkeypatch):
     monkeypatch.setenv("API_BASE_URL", "https://router.huggingface.co/v1")
     monkeypatch.setenv("HF_TOKEN", "hf-token")
     monkeypatch.setenv("API_KEY", "openai-key")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    base_url, api_key = resolve_api_credentials()
+
+    assert base_url == "https://router.huggingface.co/v1"
+    assert api_key == "openai-key"
+
+
+def test_resolve_api_credentials_falls_back_to_hf_token_when_api_key_missing(monkeypatch):
+    monkeypatch.setenv("API_BASE_URL", "https://router.huggingface.co/v1")
+    monkeypatch.setenv("HF_TOKEN", "hf-token")
+    monkeypatch.delenv("API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     base_url, api_key = resolve_api_credentials()
