@@ -23,9 +23,12 @@ def test_reward_adapter_is_small_and_pluggable():
         action_type="run_visible_tests",
         previous_best_visible_score=0.0,
         current_best_visible_score=1.0,
+        current_visible_score=1.0,
         execution=execution,
         grading=grading,
         done=False,
+        step_count=1,
+        max_steps=6,
     )
 
     assert reward > 0

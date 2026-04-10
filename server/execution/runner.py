@@ -18,13 +18,13 @@ import tempfile
 import textwrap
 import time
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Any, Iterable
 
 try:
-    from ...models import ExecutionResult, TestCaseResult
+    from ...models import ExecutionResult
     from ..tasks.base import TaskCase
 except ImportError:
-    from models import ExecutionResult, TestCaseResult
+    from models import ExecutionResult
     from server.tasks.base import TaskCase
 
 
@@ -55,7 +55,18 @@ class RunnerPayload:
     """Execution details returned from the runner prior to grading."""
 
     execution: ExecutionResult
-    test_results: list[TestCaseResult]
+    case_outputs: list["CaseOutput"]
+
+
+@dataclass
+class CaseOutput:
+    """Raw execution record for one deterministic task case."""
+
+    name: str
+    hidden: bool
+    expected: Any
+    actual: Any | None = None
+    error: str | None = None
 
 
 class UnsafeCodeError(ValueError):
@@ -113,7 +124,7 @@ class PythonExecutionRunner:
                     error=str(exc),
                     duration_ms=int((time.perf_counter() - start) * 1000),
                 ),
-                test_results=[],
+                case_outputs=[],
             )
         except UnsafeCodeError as exc:
             return RunnerPayload(
@@ -123,7 +134,7 @@ class PythonExecutionRunner:
                     error=str(exc),
                     duration_ms=int((time.perf_counter() - start) * 1000),
                 ),
-                test_results=[],
+                case_outputs=[],
             )
 
         with tempfile.TemporaryDirectory(prefix="legacygym_runner_") as temp_dir:
@@ -165,7 +176,7 @@ class PythonExecutionRunner:
                         error=f"Execution timed out after {self.timeout_s:.2f}s",
                         duration_ms=int((time.perf_counter() - start) * 1000),
                     ),
-                    test_results=[],
+                    case_outputs=[],
                 )
 
         duration_ms = int((time.perf_counter() - start) * 1000)
@@ -179,7 +190,7 @@ class PythonExecutionRunner:
                     stderr=completed.stderr,
                     duration_ms=duration_ms,
                 ),
-                test_results=[],
+                case_outputs=[],
             )
 
         payload = json.loads(completed.stdout or "{}")
@@ -191,16 +202,17 @@ class PythonExecutionRunner:
             stderr=payload.get("stderr", ""),
             duration_ms=duration_ms,
         )
-        test_results = [
-            TestCaseResult(
+        case_outputs = [
+            CaseOutput(
                 name=result["name"],
-                passed=result["passed"],
                 hidden=result["hidden"],
-                message=result.get("message", ""),
+                expected=result.get("expected"),
+                actual=result.get("actual"),
+                error=result.get("error"),
             )
             for result in payload.get("results", [])
         ]
-        return RunnerPayload(execution=execution, test_results=test_results)
+        return RunnerPayload(execution=execution, case_outputs=case_outputs)
 
 
 _HARNESS_CODE = textwrap.dedent(
@@ -265,17 +277,17 @@ _HARNESS_CODE = textwrap.dedent(
                 for case in cases:
                     try:
                         actual = target(*case["args"], **case["kwargs"])
-                        passed = actual == case["expected"]
-                        message = "passed" if passed else f"expected {case['expected']!r}, got {actual!r}"
+                        error = None
                     except Exception as exc:
-                        passed = False
-                        message = f"raised {type(exc).__name__}: {exc}"
+                        actual = None
+                        error = f"raised {type(exc).__name__}: {exc}"
                     results.append(
                         {
                             "name": case["name"],
-                            "passed": passed,
                             "hidden": case["hidden"],
-                            "message": message,
+                            "expected": case["expected"],
+                            "actual": actual,
+                            "error": error,
                         }
                     )
         except Exception as exc:

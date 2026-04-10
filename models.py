@@ -83,6 +83,14 @@ class TestCaseResult(BaseModel):
     passed: bool = Field(..., description="Whether the candidate passed this test")
     hidden: bool = Field(..., description="Whether this case is hidden from the agent")
     message: str = Field(default="", description="Brief result message")
+    expected_summary: Optional[str] = Field(
+        default=None,
+        description="Serialized expected output used for debugging and logs",
+    )
+    actual_summary: Optional[str] = Field(
+        default=None,
+        description="Serialized actual output used for debugging and logs",
+    )
 
 
 class ExecutionResult(BaseModel):
@@ -139,6 +147,10 @@ class LegacygymObservation(Observation):
     task: TaskSpec = Field(..., description="Current task specification")
     attempt: AttemptStatus = Field(..., description="Current candidate status")
     current_code: str = Field(default="", description="Current candidate Python source")
+    server_info: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Transport-safe environment/runtime metadata preserved over WebSocket",
+    )
     last_execution: Optional[ExecutionResult] = Field(
         default=None,
         description="Most recent execution result, if any",

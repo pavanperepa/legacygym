@@ -63,6 +63,48 @@ def build_task(pair: RosettaTaskPair) -> TaskDefinition:
             _reference_word_frequency("apple banana apple cherry banana banana", 1),
             hidden=True,
         ),
+        TaskCase(
+            "n_exceeds_unique_word_count",
+            ("mars venus mars", 5),
+            _reference_word_frequency("mars venus mars", 5),
+            hidden=True,
+        ),
+        TaskCase(
+            "embedded_apostrophes_split_words",
+            ("can't cant can't", 3),
+            _reference_word_frequency("can't cant can't", 3),
+            hidden=True,
+        ),
+        TaskCase(
+            "newline_and_tabs",
+            ("Blue\tblue\nGREEN green blue", 2),
+            _reference_word_frequency("Blue\tblue\nGREEN green blue", 2),
+            hidden=True,
+        ),
+        TaskCase(
+            "zero_n_returns_empty",
+            ("alpha beta gamma", 0),
+            _reference_word_frequency("alpha beta gamma", 0),
+            hidden=True,
+        ),
+        TaskCase(
+            "hyphenated_words_split",
+            ("state-of-the-art state of the art", 4),
+            _reference_word_frequency("state-of-the-art state of the art", 4),
+            hidden=True,
+        ),
+        TaskCase(
+            "punctuation_only_text",
+            ("!!! ... ,,,", 3),
+            _reference_word_frequency("!!! ... ,,,", 3),
+            hidden=True,
+        ),
+        TaskCase(
+            "dense_tie_breaking",
+            ("delta alpha gamma beta delta alpha gamma beta", 4),
+            _reference_word_frequency("delta alpha gamma beta delta alpha gamma beta", 4),
+            hidden=True,
+        ),
     ]
     spec = TaskSpec(
         task_id="word_frequency",
@@ -70,10 +112,11 @@ def build_task(pair: RosettaTaskPair) -> TaskDefinition:
         difficulty="hard",
         summary=(
             "Translate the COBOL behavior into a Python function named "
-            "`word_frequency`. Extract words using the regex `[A-Za-z]+`, lowercase "
-            "them, count frequencies, sort by descending frequency and then "
-            "alphabetically for tie-breaking, and return the top `n` items as a list "
-            "of `(word, count)` tuples. Do not read files or print output."
+            "`word_frequency`. Extract alphabetic words from the text, normalize them "
+            "for counting, rank by descending frequency with alphabetical tie-breaking, "
+            "and return the top `n` results as `(word, count)` pairs. Ignore non-letter "
+            "characters instead of treating them as part of words. Do not read files "
+            "or print output."
         ),
         cobol_source=pair.cobol_code,
         python_function_signature="def word_frequency(text: str, n: int) -> list[tuple[str, int]]",

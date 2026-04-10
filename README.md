@@ -24,7 +24,7 @@ The environment is intentionally lightweight and deterministic. It does not exec
 - The current baseline includes:
   - typed environment contracts
   - deterministic execution and grading
-  - 3 curated Rosetta-backed tasks
+  - 5 curated Rosetta-backed tasks
   - multi-step agent actions
   - root-level `inference.py`
   - root-level `Dockerfile`
@@ -32,16 +32,20 @@ The environment is intentionally lightweight and deterministic. It does not exec
 - The current curated tasks are:
   - `array_length`
   - `tokenize_with_escaping`
+  - `levenshtein_distance`
   - `word_frequency`
+  - `align_columns`
 - The baseline currently runs all curated tasks in sequence by default.
 
 ## Tasks
 
-V1 ships three fixed Rosetta-backed tasks with increasing difficulty:
+V1 currently ships five fixed Rosetta-backed tasks with increasing difficulty:
 
 - `array_length` (`easy`): return the number of elements in a list.
 - `tokenize_with_escaping` (`medium`): split on unescaped separators while preserving escaped characters.
+- `levenshtein_distance` (`medium`): compute edit distance between two strings.
 - `word_frequency` (`hard`): normalize text, count words, and return the top `n` items with deterministic tie-breaking.
+- `align_columns` (`hard`): align dollar-delimited text columns with left/right/center justification.
 
 The dataset source is [rosetta-code-task-comparisons.json](/c:/Users/pavan/openenv-rl-gym/legacygym/rosetta-code-task-comparisons.json). The paired Python snippets are used only as reference material while authoring tasks and tests; the runtime baseline does not use them as direct answers.
 

@@ -8,9 +8,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Sequence
+from typing import Any, Callable, Dict, List, Sequence
 
 try:
     from ...models import TaskExample, TaskSpec
@@ -48,6 +48,30 @@ class TaskCase:
         )
 
 
+def canonicalize_result(value: Any) -> Any:
+    """Normalize nested outputs for deterministic task-aware comparisons."""
+
+    if isinstance(value, tuple):
+        return [canonicalize_result(item) for item in value]
+    if isinstance(value, list):
+        return [canonicalize_result(item) for item in value]
+    if isinstance(value, dict):
+        return {key: canonicalize_result(item) for key, item in value.items()}
+    return value
+
+
+def default_result_comparator(actual: Any, expected: Any) -> bool:
+    """Default comparator for task outputs."""
+
+    return canonicalize_result(actual) == canonicalize_result(expected)
+
+
+def format_result_summary(value: Any) -> str:
+    """Render a normalized output summary for logs and grader feedback."""
+
+    return repr(canonicalize_result(value))
+
+
 @dataclass(frozen=True)
 class TaskDefinition:
     """Complete internal definition for one environment task."""
@@ -58,6 +82,7 @@ class TaskDefinition:
     visible_cases: List[TaskCase]
     hidden_cases: List[TaskCase]
     allowed_imports: List[str]
+    comparator: Callable[[Any, Any], bool] = field(default=default_result_comparator)
 
     @property
     def all_cases(self) -> List[TaskCase]:

@@ -27,6 +27,8 @@ def build_task(pair: RosettaTaskPair) -> TaskDefinition:
         TaskCase("single_item", (["x"],), 1, hidden=True),
         TaskCase("five_items", (["a", "b", "c", "d", "e"],), 5, hidden=True),
         TaskCase("repeated_values", (["same", "same", "same"],), 3, hidden=True),
+        TaskCase("whitespace_values", (["", " ", "  ", "\t"],), 4, hidden=True),
+        TaskCase("long_list", ([str(index) for index in range(32)],), 32, hidden=True),
     ]
     spec = TaskSpec(
         task_id="array_length",
@@ -34,8 +36,8 @@ def build_task(pair: RosettaTaskPair) -> TaskDefinition:
         difficulty="easy",
         summary=(
             "Translate the legacy COBOL behavior into a Python function named "
-            "`array_length`. Return the number of elements in `items`. Do not print "
-            "anything, and do not mutate the input list."
+            "`array_length`. Return the count represented by the incoming list as-is. "
+            "Do not print anything, and do not mutate the input list."
         ),
         cobol_source=pair.cobol_code,
         python_function_signature="def array_length(items: list[str]) -> int",

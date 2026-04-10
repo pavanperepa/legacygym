@@ -27,6 +27,27 @@ def build_task(pair: RosettaTaskPair) -> TaskDefinition:
         TaskCase("escaped_escape", ("one\\\\,two", ",", "\\"), ["one\\", "two"], hidden=True),
         TaskCase("trailing_escape", ("abc\\", ",", "\\"), ["abc\\"], hidden=True),
         TaskCase("mixed_symbols", ("x\\|y|z\\||", "|", "\\"), ["x|y", "z|", ""], hidden=True),
+        TaskCase("leading_separator", ("|a\\||b", "|", "\\"), ["", "a|", "b"], hidden=True),
+        TaskCase("double_escape_before_separator", ("a\\\\|b|c", "|", "\\"), ["a\\", "b", "c"], hidden=True),
+        TaskCase("no_separator_present", ("value\\|tail", ",", "\\"), ["value|tail"], hidden=True),
+        TaskCase(
+            "consecutive_escaped_separator_runs",
+            ("a\\,b\\,c,d", ",", "\\"),
+            ["a,b,c", "d"],
+            hidden=True,
+        ),
+        TaskCase(
+            "separator_at_end",
+            ("keep|tail|", "|", "\\"),
+            ["keep", "tail", ""],
+            hidden=True,
+        ),
+        TaskCase(
+            "escaped_escape_then_literal_separator",
+            ("root\\\\|child\\|leaf|end", "|", "\\"),
+            ["root\\", "child|leaf", "end"],
+            hidden=True,
+        ),
     ]
     spec = TaskSpec(
         task_id="tokenize_with_escaping",
@@ -34,11 +55,10 @@ def build_task(pair: RosettaTaskPair) -> TaskDefinition:
         difficulty="medium",
         summary=(
             "Translate the COBOL behavior into a Python function named "
-            "`tokenize_with_escaping`. Split `text` on unescaped occurrences of "
-            "`separator`. The escape character removes itself and preserves the next "
-            "character literally. If the escape character appears at the very end of "
-            "the string, keep it in the final token. Return a list of tokens and do "
-            "not print anything."
+            "`tokenize_with_escaping`. Partition the input into tokens using the "
+            "separator, but treat escaped characters as literal content. A trailing "
+            "escape character remains in the final token. Empty tokens still matter. "
+            "Return the tokens in order and do not print anything."
         ),
         cobol_source=pair.cobol_code,
         python_function_signature=(

@@ -27,7 +27,9 @@ This repo is not a production migration platform. It is an evaluation/training e
 - The current curated tasks are:
   - `array_length`
   - `tokenize_with_escaping`
+  - `levenshtein_distance`
   - `word_frequency`
+  - `align_columns`
 - The baseline currently runs all curated tasks in sequence by default.
 - Local run artifacts are written under `run_logs/`.
 

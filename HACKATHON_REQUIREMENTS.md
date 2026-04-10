@@ -18,9 +18,12 @@ This environment must simulate a real-world task, not a toy problem or game.
   - `step()`
   - `state()`
 - The current task set includes 3 graded tasks:
+- The current task set includes 5 graded tasks:
   - `array_length`
   - `tokenize_with_escaping`
+  - `levenshtein_distance`
   - `word_frequency`
+  - `align_columns`
 - Deterministic grading, controlled execution, and a minimal reward adapter are implemented.
 - A root-level `inference.py` exists and currently runs all curated tasks in sequence by default.
 - A root-level `Dockerfile` exists for deployment.
@@ -93,6 +96,9 @@ The sample code also supports:
 - `API_KEY` as a fallback auth variable,
 - `IMAGE_NAME` for Docker-image-based environment startup,
 - task/benchmark-specific variables such as task name and benchmark name
+
+Note:
+- in evaluator/submission runs, prefer the injected `API_BASE_URL` and `API_KEY` exactly as provided so requests are observed on the expected proxy path.
 
 Important note:
 - the prose header mentions `LOCAL_IMAGE_NAME`,

@@ -12,14 +12,14 @@ import ast
 from typing import Literal
 
 try:
-    from ...models import ExecutionResult, GradingResult
+    from ...models import ExecutionResult, GradingResult, TestCaseResult
     from ..execution.runner import PythonExecutionRunner
-    from ..tasks.base import TaskDefinition
+    from ..tasks.base import TaskDefinition, format_result_summary
     from .base import DEFAULT_SCORE_WEIGHTS, ScoreWeights
 except ImportError:
-    from models import ExecutionResult, GradingResult
+    from models import ExecutionResult, GradingResult, TestCaseResult
     from server.execution.runner import PythonExecutionRunner
-    from server.tasks.base import TaskDefinition
+    from server.tasks.base import TaskDefinition, format_result_summary
     from server.graders.base import DEFAULT_SCORE_WEIGHTS, ScoreWeights
 
 
@@ -48,8 +48,33 @@ class DeterministicCodeGrader:
             allowed_imports=task.allowed_imports,
         )
         execution = runner_payload.execution
-        visible_results = [result for result in runner_payload.test_results if not result.hidden]
-        hidden_results = [result for result in runner_payload.test_results if result.hidden]
+        test_results = []
+        for case_output in runner_payload.case_outputs:
+            passed = case_output.error is None and task.comparator(case_output.actual, case_output.expected)
+            if case_output.error is not None:
+                message = case_output.error
+            elif passed:
+                message = "passed"
+            else:
+                message = (
+                    f"expected {format_result_summary(case_output.expected)}, "
+                    f"got {format_result_summary(case_output.actual)}"
+                )
+            test_results.append(
+                TestCaseResult(
+                    name=case_output.name,
+                    passed=passed,
+                    hidden=case_output.hidden,
+                    message=message,
+                    expected_summary=format_result_summary(case_output.expected),
+                    actual_summary=(
+                        None if case_output.error is not None else format_result_summary(case_output.actual)
+                    ),
+                )
+            )
+
+        visible_results = [result for result in test_results if not result.hidden]
+        hidden_results = [result for result in test_results if result.hidden]
 
         visible_total = len(visible_results)
         hidden_total = len(hidden_results)
@@ -75,7 +100,7 @@ class DeterministicCodeGrader:
         feedback = []
         feedback.extend(safety_feedback)
         feedback.extend(maintainability_feedback)
-        failing_cases = [result for result in runner_payload.test_results if not result.passed]
+        failing_cases = [result for result in test_results if not result.passed]
         if failing_cases:
             feedback.append(
                 f"{len(failing_cases)} test(s) failed: "
@@ -93,7 +118,7 @@ class DeterministicCodeGrader:
             hidden_passed=hidden_passed,
             hidden_total=hidden_total,
             feedback=feedback,
-            test_results=runner_payload.test_results,
+            test_results=test_results,
         )
         return execution, grading
 

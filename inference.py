@@ -15,7 +15,13 @@ from openai import OpenAI
 
 from legacygym import LegacygymAction, LegacygymEnv, LegacygymObservation
 
-CURATED_TASK_IDS = ["array_length", "tokenize_with_escaping", "word_frequency"]
+CURATED_TASK_IDS = [
+    "array_length",
+    "tokenize_with_escaping",
+    "levenshtein_distance",
+    "word_frequency",
+    "align_columns",
+]
 
 
 class ModelAgent(Protocol):
@@ -257,6 +263,39 @@ def _collect_agent_interactions(agent: ModelAgent, task_id: str) -> list[dict[st
     return [item for item in interactions if item.get("task_id") == task_id]
 
 
+def _extract_server_metadata(observation: LegacygymObservation) -> dict[str, object]:
+    """Return stable server metadata from an observation."""
+
+    metadata = dict(observation.server_info or observation.metadata)
+    return {
+        "environment_name": metadata.get("environment_name", "legacygym"),
+        "environment_version": metadata.get("environment_version"),
+        "registry_signature": metadata.get("registry_signature"),
+        "available_task_ids": metadata.get("available_task_ids", []),
+        "reward_weights": metadata.get("reward_weights", {}),
+        "score_weights": metadata.get("score_weights", {}),
+        "runner_timeout_s": metadata.get("runner_timeout_s"),
+    }
+
+
+async def probe_server_metadata(env: LegacygymEnv) -> dict[str, object]:
+    """Fetch server metadata before starting task episodes."""
+
+    reset_result = await _resolve_async_result(env.reset())
+    return _extract_server_metadata(reset_result.observation)
+
+
+def validate_server_task_ids(
+    *,
+    expected_task_ids: list[str],
+    available_task_ids: list[str],
+) -> list[str]:
+    """Return the curated tasks that the connected server does not expose."""
+
+    available = set(available_task_ids)
+    return [task_id for task_id in expected_task_ids if task_id not in available]
+
+
 def write_task_run_logs(
     session_dir: Path | None,
     *,
@@ -271,6 +310,7 @@ def write_task_run_logs(
     final_observation: LegacygymObservation,
     step_records: list[dict[str, object]],
     agent: ModelAgent,
+    server_metadata: dict[str, object] | None = None,
 ) -> None:
     """Persist detailed per-task artifacts for local inspection."""
 
@@ -289,8 +329,10 @@ def write_task_run_logs(
             "steps": steps,
             "score": score,
             "rewards": rewards,
+            "server_metadata": server_metadata or {},
         },
     )
+    _write_json(task_dir / "server_metadata.json", server_metadata or {})
     _write_json(task_dir / "initial_observation.json", initial_observation.model_dump(mode="json"))
     _write_json(task_dir / "final_observation.json", final_observation.model_dump(mode="json"))
     _write_json(task_dir / "steps.json", step_records)
@@ -315,11 +357,13 @@ async def run_episode(
     step_records: list[dict[str, object]] = []
     initial_observation: LegacygymObservation | None = None
     observation: LegacygymObservation | None = None
+    server_metadata: dict[str, object] | None = None
 
     try:
         reset_result = await _resolve_async_result(env.reset(task_id=task_id))
         observation = reset_result.observation
         initial_observation = observation.model_copy(deep=True)
+        server_metadata = _extract_server_metadata(observation)
 
         actions: list[LegacygymAction] = [
             LegacygymAction(
@@ -360,7 +404,8 @@ async def run_episode(
 
             if action.action_type == "run_visible_tests":
                 last_grading = observation.last_grading
-                remaining_steps = int(observation.metadata.get("remaining_steps", 0))
+                runtime_info = observation.server_info or observation.metadata
+                remaining_steps = int(runtime_info.get("remaining_steps", 0))
                 if last_grading and last_grading.visible_passed == last_grading.visible_total:
                     actions.append(LegacygymAction(action_type="submit"))
                 elif remaining_steps > 1:
@@ -402,6 +447,7 @@ async def run_episode(
                 final_observation=observation,
                 step_records=step_records,
                 agent=agent,
+                server_metadata=server_metadata,
             )
         elif run_log_dir is not None:
             task_dir = run_log_dir / task_id
@@ -417,8 +463,10 @@ async def run_episode(
                     "score": score,
                     "rewards": rewards,
                     "error": step_records[-1]["error"] if step_records else "unknown error",
+                    "server_metadata": server_metadata or {},
                 },
             )
+            _write_json(task_dir / "server_metadata.json", server_metadata or {})
             _write_json(task_dir / "steps.json", step_records)
     return success, step_index, score, rewards
 
@@ -434,7 +482,43 @@ async def run_tasks(
 ) -> list[dict[str, object]]:
     """Run a sequence of tasks and return aggregate results."""
 
+    server_metadata = await probe_server_metadata(env)
+    missing_task_ids = validate_server_task_ids(
+        expected_task_ids=task_ids,
+        available_task_ids=list(server_metadata.get("available_task_ids", [])),
+    )
+
+    if run_log_dir is not None:
+        _write_json(
+            run_log_dir / "server_preflight.json",
+            {
+                "requested_task_ids": task_ids,
+                "server_metadata": server_metadata,
+                "missing_task_ids": missing_task_ids,
+            },
+        )
+
     results: list[dict[str, object]] = []
+    if missing_task_ids:
+        error = (
+            "Connected server does not expose all requested tasks: "
+            + ", ".join(missing_task_ids)
+        )
+        results = [
+            {
+                "task_id": task_id,
+                "success": False,
+                "steps": 0,
+                "score": 0.0,
+                "rewards": [],
+                "error": error,
+            }
+            for task_id in task_ids
+        ]
+        if run_log_dir is not None:
+            _write_json(run_log_dir / "aggregate_summary.json", results)
+        return results
+
     for task_id in task_ids:
         success, steps, score, rewards = await run_episode(
             env,
@@ -451,6 +535,7 @@ async def run_tasks(
                 "steps": steps,
                 "score": score,
                 "rewards": rewards,
+                "server_metadata": server_metadata,
             }
         )
 
@@ -469,14 +554,26 @@ async def main() -> None:
     model_name = os.getenv("MODEL_NAME", "unknown-model")
     run_log_dir = create_run_log_session_dir()
     try:
-        await run_tasks(
-            env,
-            agent,
-            task_ids=task_ids,
-            benchmark_name=benchmark_name,
-            model_name=model_name,
-            run_log_dir=run_log_dir,
-        )
+        try:
+            await run_tasks(
+                env,
+                agent,
+                task_ids=task_ids,
+                benchmark_name=benchmark_name,
+                model_name=model_name,
+                run_log_dir=run_log_dir,
+            )
+        except Exception as exc:
+            if run_log_dir is not None:
+                _write_json(
+                    run_log_dir / "run_error.json",
+                    {
+                        "benchmark_name": benchmark_name,
+                        "model_name": model_name,
+                        "task_ids": task_ids,
+                        "error": str(exc),
+                    },
+                )
     finally:
         await _resolve_async_result(env.close())
 

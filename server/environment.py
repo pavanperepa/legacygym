@@ -31,6 +31,7 @@ class LegacygymEnvironment(Environment):
     """Environment for deterministic COBOL-to-Python modernization tasks."""
 
     SUPPORTS_CONCURRENT_SESSIONS: bool = True
+    ENVIRONMENT_VERSION: str = "baseline-v1"
 
     def __init__(self):
         super().__init__()
@@ -79,6 +80,7 @@ class LegacygymEnvironment(Environment):
         self._session.last_action = action.action_type
         self._session.reward_breakdown = []
         previous_best_visible = self._session.best_visible_score
+        current_visible_score = previous_best_visible
 
         if action.action_type == "replace_solution":
             self._session.current_code = action.code or ""
@@ -99,21 +101,27 @@ class LegacygymEnvironment(Environment):
             self._session.last_execution = execution
             self._session.last_grading = grading
             visible_score = grading.visible_passed / grading.visible_total if grading.visible_total else 0.0
+            current_visible_score = visible_score
             self._session.best_visible_score = max(self._session.best_visible_score, visible_score)
             self._session.last_error = execution.error or (grading.feedback[0] if grading.feedback else None)
         elif action.action_type == "submit":
             self._finalize_with_full_grading()
+            current_visible_score = self._session.best_visible_score
 
         if not self._session.done and self._session.step_count >= self._session.task.spec.step_budget:
             self._finalize_with_full_grading()
+            current_visible_score = self._session.best_visible_score
 
         reward, components = self.reward_adapter.compute(
             action_type=action.action_type,
             previous_best_visible_score=previous_best_visible,
             current_best_visible_score=self._session.best_visible_score,
+            current_visible_score=current_visible_score,
             execution=self._session.last_execution,
             grading=self._session.last_grading,
             done=self._session.done,
+            step_count=self._session.step_count,
+            max_steps=self._session.task.spec.step_budget,
         )
         self._session.reward_breakdown = components
         return self._build_observation(reward=reward)
@@ -132,20 +140,29 @@ class LegacygymEnvironment(Environment):
         self._session.done = True
 
     def _build_observation(self, reward: float) -> LegacygymObservation:
+        remaining_steps = max(0, self._session.task.spec.step_budget - self._session.step_count)
+        server_info = {
+            "task_id": self._session.task.spec.task_id,
+            "remaining_steps": remaining_steps,
+            "available_task_ids": self.registry.task_ids(),
+            "registry_signature": self.registry.signature(),
+            "environment_name": "legacygym",
+            "environment_version": self.ENVIRONMENT_VERSION,
+            "runner_timeout_s": self.runner.timeout_s,
+            "reward_weights": self.reward_adapter.weights_as_dict(),
+            "score_weights": self.grader.weights.as_dict(),
+        }
         return LegacygymObservation(
             task=self._session.task.spec,
             attempt=self._session.attempt_status(),
             current_code=self._session.current_code,
+            server_info=server_info,
             last_execution=self._session.last_execution,
             last_grading=self._session.last_grading,
             reward_breakdown=self._session.reward_breakdown,
             done=self._session.done,
             reward=reward,
-            metadata={
-                "task_id": self._session.task.spec.task_id,
-                "remaining_steps": max(0, self._session.task.spec.step_budget - self._session.step_count),
-                "available_task_ids": self.registry.task_ids(),
-            },
+            metadata=server_info,
         )
 
     @property

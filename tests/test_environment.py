@@ -7,6 +7,11 @@ def test_environment_supports_replace_test_submit_flow():
     reset = env.reset(task_id="array_length")
     assert reset.task.task_id == "array_length"
     assert not reset.done
+    assert reset.server_info["task_id"] == "array_length"
+    assert "array_length" in reset.server_info["available_task_ids"]
+    assert "registry_signature" in reset.metadata
+    assert "reward_weights" in reset.metadata
+    assert "score_weights" in reset.metadata
 
     replace = env.step(
         LegacygymAction(
