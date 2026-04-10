@@ -13,6 +13,7 @@ from inference import (
     format_start_line,
     format_step_line,
     load_dotenv,
+    main,
     resolve_api_credentials,
     resolve_task_ids,
     run_tasks,
@@ -385,3 +386,41 @@ def test_run_tasks_continues_when_preflight_probe_fails(tmp_path, capsys):
     assert any(line.startswith("[STEP]") for line in captured)
     assert captured[-1].startswith("[END]")
     assert results[0]["task_id"] == "array_length"
+
+
+def test_main_handles_startup_exception_without_raising(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("RUN_LOG_DIR", str(tmp_path))
+    monkeypatch.setenv("TASK_NAME", "array_length")
+    monkeypatch.setenv("MODEL_NAME", "test-model")
+    monkeypatch.setattr("inference.create_environment", lambda: AsyncEnvironmentAdapter(LegacygymEnvironment()))
+    monkeypatch.setattr("inference.create_model_agent", lambda: (_ for _ in ()).throw(RuntimeError("startup failed")))
+
+    asyncio.run(main())
+
+    captured = capsys.readouterr().out.strip().splitlines()
+    assert captured[0].startswith("[START]")
+    assert captured[-1].startswith("[END]")
+    run_dirs = list(tmp_path.iterdir())
+    assert len(run_dirs) == 1
+    assert (run_dirs[0] / "run_error.json").exists()
+
+
+def test_main_handles_close_exception_without_raising(monkeypatch, tmp_path, capsys):
+    class CloseFailEnvironmentAdapter(AsyncEnvironmentAdapter):
+        async def close(self):
+            raise RuntimeError("close failed")
+
+    monkeypatch.setenv("RUN_LOG_DIR", str(tmp_path))
+    monkeypatch.setenv("TASK_NAME", "array_length")
+    monkeypatch.setenv("MODEL_NAME", "test-model")
+    monkeypatch.setattr("inference.create_environment", lambda: CloseFailEnvironmentAdapter(LegacygymEnvironment()))
+    monkeypatch.setattr("inference.create_model_agent", lambda: StaticAgent())
+
+    asyncio.run(main())
+
+    captured = capsys.readouterr().out.strip().splitlines()
+    assert captured[0].startswith("[START]")
+    assert captured[-1].startswith("[END]")
+    run_dirs = list(tmp_path.iterdir())
+    assert len(run_dirs) == 1
+    assert (run_dirs[0] / "close_error.json").exists()

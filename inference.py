@@ -567,17 +567,18 @@ async def run_tasks(
 
 async def main() -> None:
     load_dotenv()
-    env = create_environment()
-    agent = create_model_agent()
-    probe = getattr(agent, "probe_proxy", None)
-    if callable(probe):
-        probe()
     task_ids = resolve_task_ids()
     benchmark_name = os.getenv("BENCHMARK_NAME", "legacygym")
     model_name = os.getenv("MODEL_NAME", "unknown-model")
     run_log_dir = create_run_log_session_dir()
+    env: LegacygymEnv | None = None
     try:
         try:
+            env = create_environment()
+            agent = create_model_agent()
+            probe = getattr(agent, "probe_proxy", None)
+            if callable(probe):
+                probe()
             await run_tasks(
                 env,
                 agent,
@@ -601,7 +602,20 @@ async def main() -> None:
                     },
                 )
     finally:
-        await _resolve_async_result(env.close())
+        if env is not None:
+            try:
+                await _resolve_async_result(env.close())
+            except Exception as exc:
+                if run_log_dir is not None:
+                    _write_json(
+                        run_log_dir / "close_error.json",
+                        {
+                            "benchmark_name": benchmark_name,
+                            "model_name": model_name,
+                            "task_ids": task_ids,
+                            "error": str(exc),
+                        },
+                    )
 
 
 if __name__ == "__main__":
