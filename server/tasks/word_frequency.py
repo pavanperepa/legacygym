@@ -20,10 +20,11 @@ except ImportError:
 
 
 _WORD_RE = re.compile(r"[A-Za-z]+")
+_MAX_WORD_LENGTH = 20
 
 
 def _reference_word_frequency(text: str, n: int) -> list[tuple[str, int]]:
-    words = _WORD_RE.findall(text.lower())
+    words = [word[:_MAX_WORD_LENGTH] for word in _WORD_RE.findall(text.lower())]
     counts = Counter(words)
     ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
     return ranked[:n]
@@ -105,6 +106,36 @@ def build_task(pair: RosettaTaskPair) -> TaskDefinition:
             _reference_word_frequency("delta alpha gamma beta delta alpha gamma beta", 4),
             hidden=True,
         ),
+        TaskCase(
+            "truncate_long_words_before_counting",
+            ("abcdefghijklmnopqrstuvw abcdefghijklmnopqrstzzz short", 3),
+            _reference_word_frequency("abcdefghijklmnopqrstuvw abcdefghijklmnopqrstzzz short", 3),
+            hidden=True,
+        ),
+        TaskCase(
+            "truncation_can_merge_counts",
+            ("abcdefghijklmnopqrstuv abcdefghijklmnopqrstxy abcdefghijklmnopqrstuv", 2),
+            _reference_word_frequency(
+                "abcdefghijklmnopqrstuv abcdefghijklmnopqrstxy abcdefghijklmnopqrstuv",
+                2,
+            ),
+            hidden=True,
+        ),
+        TaskCase(
+            "mixed_long_and_short_words",
+            ("supercalifragilisticexpialidocious beta supercalifragilisticexpialidocious", 2),
+            _reference_word_frequency(
+                "supercalifragilisticexpialidocious beta supercalifragilisticexpialidocious",
+                2,
+            ),
+            hidden=True,
+        ),
+        TaskCase(
+            "ascii_only_word_extraction",
+            ("café cafe café", 3),
+            _reference_word_frequency("café cafe café", 3),
+            hidden=True,
+        ),
     ]
     spec = TaskSpec(
         task_id="word_frequency",
@@ -115,8 +146,9 @@ def build_task(pair: RosettaTaskPair) -> TaskDefinition:
             "`word_frequency`. Extract alphabetic words from the text, normalize them "
             "for counting, rank by descending frequency with alphabetical tie-breaking, "
             "and return the top `n` results as `(word, count)` pairs. Ignore non-letter "
-            "characters instead of treating them as part of words. Do not read files "
-            "or print output."
+            "characters instead of treating them as part of words. Respect the "
+            "fixed-width word-record behavior visible in the COBOL source before "
+            "counting. Do not read files or print output."
         ),
         cobol_source=pair.cobol_code,
         python_function_signature="def word_frequency(text: str, n: int) -> list[tuple[str, int]]",

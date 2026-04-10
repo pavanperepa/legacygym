@@ -7,6 +7,7 @@
 """Task helpers and curated Rosetta task builders."""
 
 from .align_columns import build_task as build_align_columns_task
+from .automatic_abbreviations import build_task as build_automatic_abbreviations_task
 from .array_length import build_task as build_array_length_task
 from .base import RosettaTaskPair, TaskCase, TaskDefinition, dataset_path
 from .dataset import load_rosetta_pairs
@@ -16,6 +17,7 @@ from .word_frequency import build_task as build_word_frequency_task
 
 __all__ = [
     "build_align_columns_task",
+    "build_automatic_abbreviations_task",
     "RosettaTaskPair",
     "TaskCase",
     "TaskDefinition",

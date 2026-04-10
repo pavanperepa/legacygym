@@ -17,7 +17,7 @@ from legacygym import LegacygymAction, LegacygymEnv, LegacygymObservation
 
 CURATED_TASK_IDS = [
     "array_length",
-    "tokenize_with_escaping",
+    "automatic_abbreviations",
     "levenshtein_distance",
     "word_frequency",
     "align_columns",
@@ -84,6 +84,12 @@ def format_end_line(success: bool, steps: int, score: float, rewards: list[float
         f"[END] success={str(success).lower()} steps={steps} "
         f"score={score:.4f} rewards={reward_blob}"
     )
+
+
+def emit_structured_line(line: str) -> None:
+    """Print a structured validator-facing line and flush immediately."""
+
+    print(line, flush=True)
 
 
 def _strip_code_fences(text: str) -> str:
@@ -349,7 +355,7 @@ async def run_episode(
     model_name: str,
     run_log_dir: Path | None = None,
 ) -> tuple[bool, int, float, list[float]]:
-    print(format_start_line(task_id, benchmark_name, model_name))
+    emit_structured_line(format_start_line(task_id, benchmark_name, model_name))
     rewards: list[float] = []
     step_index = 0
     success = False
@@ -391,7 +397,9 @@ async def run_episode(
                     "observation": observation.model_dump(mode="json"),
                 }
             )
-            print(format_step_line(step_index, action.action_type, reward, result.done, error))
+            emit_structured_line(
+                format_step_line(step_index, action.action_type, reward, result.done, error)
+            )
 
             if result.done:
                 score = observation.last_grading.final_score if observation.last_grading else 0.0
@@ -432,7 +440,7 @@ async def run_episode(
             }
         )
     finally:
-        print(format_end_line(success, step_index, score, rewards))
+        emit_structured_line(format_end_line(success, step_index, score, rewards))
         if initial_observation is not None and observation is not None:
             write_task_run_logs(
                 run_log_dir,
@@ -504,6 +512,9 @@ async def run_tasks(
             "Connected server does not expose all requested tasks: "
             + ", ".join(missing_task_ids)
         )
+        for task_id in task_ids:
+            emit_structured_line(format_start_line(task_id, benchmark_name, model_name))
+            emit_structured_line(format_end_line(False, 0, 0.0, []))
         results = [
             {
                 "task_id": task_id,
@@ -564,6 +575,9 @@ async def main() -> None:
                 run_log_dir=run_log_dir,
             )
         except Exception as exc:
+            for task_id in task_ids:
+                emit_structured_line(format_start_line(task_id, benchmark_name, model_name))
+                emit_structured_line(format_end_line(False, 0, 0.0, []))
             if run_log_dir is not None:
                 _write_json(
                     run_log_dir / "run_error.json",

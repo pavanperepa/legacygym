@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+_MAX_RECORD_LENGTH = 255
+
 try:
     from ...models import TaskSpec
     from .base import RosettaTaskPair, TaskCase, TaskDefinition
@@ -17,6 +19,8 @@ except ImportError:
 
 
 def _reference_distance(left: str, right: str) -> int:
+    left = left[:_MAX_RECORD_LENGTH]
+    right = right[:_MAX_RECORD_LENGTH]
     if not left:
         return len(right)
     if not right:
@@ -73,6 +77,30 @@ def build_task(pair: RosettaTaskPair) -> TaskDefinition:
             _reference_distance("alignment", "misalignment"),
             hidden=True,
         ),
+        TaskCase(
+            "trailing_spaces_are_significant",
+            ("abc  ", "abc"),
+            _reference_distance("abc  ", "abc"),
+            hidden=True,
+        ),
+        TaskCase(
+            "leading_spaces_are_significant",
+            ("  abc", "abc"),
+            _reference_distance("  abc", "abc"),
+            hidden=True,
+        ),
+        TaskCase(
+            "truncate_to_255_characters_left",
+            ("a" * 255 + "zzz", "a" * 255),
+            _reference_distance("a" * 255 + "zzz", "a" * 255),
+            hidden=True,
+        ),
+        TaskCase(
+            "truncate_to_255_characters_right",
+            ("b" * 254 + "c", "b" * 254 + "d" + "extra"),
+            _reference_distance("b" * 254 + "c", "b" * 254 + "d" + "extra"),
+            hidden=True,
+        ),
     ]
     spec = TaskSpec(
         task_id="levenshtein_distance",
@@ -82,8 +110,10 @@ def build_task(pair: RosettaTaskPair) -> TaskDefinition:
             "Translate the COBOL behavior into a Python function named "
             "`levenshtein_distance`. Return the minimum number of single-character "
             "insertions, deletions, and substitutions needed to transform one string "
-            "into the other. Do not treat swaps as a separate primitive. Do not print "
-            "anything, and do not use external libraries."
+            "into the other. Do not treat swaps as a separate primitive. Preserve the "
+            "legacy fixed-width input semantics from the COBOL source rather than "
+            "silently normalizing the strings. Do not print anything, and do not use "
+            "external libraries."
         ),
         cobol_source=pair.cobol_code,
         python_function_signature="def levenshtein_distance(left: str, right: str) -> int",

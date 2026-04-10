@@ -31,7 +31,7 @@ The environment is intentionally lightweight and deterministic. It does not exec
   - local run artifacts under `run_logs/`
 - The current curated tasks are:
   - `array_length`
-  - `tokenize_with_escaping`
+  - `automatic_abbreviations`
   - `levenshtein_distance`
   - `word_frequency`
   - `align_columns`
@@ -42,7 +42,7 @@ The environment is intentionally lightweight and deterministic. It does not exec
 V1 currently ships five fixed Rosetta-backed tasks with increasing difficulty:
 
 - `array_length` (`easy`): return the number of elements in a list.
-- `tokenize_with_escaping` (`medium`): split on unescaped separators while preserving escaped characters.
+- `automatic_abbreviations` (`hard`): find the shortest unique abbreviations for a fixed-size list with structured validation errors.
 - `levenshtein_distance` (`medium`): compute edit distance between two strings.
 - `word_frequency` (`hard`): normalize text, count words, and return the top `n` items with deterministic tie-breaking.
 - `align_columns` (`hard`): align dollar-delimited text columns with left/right/center justification.

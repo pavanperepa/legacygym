@@ -26,8 +26,8 @@ class StaticAgent:
     def generate_initial_solution(self, observation):
         if observation.task.task_id == "array_length":
             return """def array_length(items: list[str]) -> int:\n    \"\"\"Return the number of items.\"\"\"\n    return len(items)\n"""
-        if observation.task.task_id == "tokenize_with_escaping":
-            return """def tokenize_with_escaping(text: str, separator: str, escape: str) -> list[str]:\n    \"\"\"Split on non-escaped separators.\"\"\"\n    tokens: list[str] = []\n    current: list[str] = []\n    i = 0\n    while i < len(text):\n        char = text[i]\n        if char == escape:\n            if i + 1 < len(text):\n                current.append(text[i + 1])\n                i += 2\n                continue\n            current.append(char)\n            i += 1\n            continue\n        if char == separator:\n            tokens.append(\"\".join(current))\n            current = []\n            i += 1\n            continue\n        current.append(char)\n        i += 1\n    tokens.append(\"\".join(current))\n    return tokens\n"""
+        if observation.task.task_id == "automatic_abbreviations":
+            return """def automatic_abbreviations(text: str, expected_count: int) -> dict[str, object]:\n    \"\"\"Return the shortest unique abbreviations or a structured validation error.\"\"\"\n    words = text.split()\n    if len(words) != expected_count:\n        return {\"status\": \"error\", \"reason\": \"expected_count_mismatch\"}\n    if len(set(words)) != len(words):\n        return {\"status\": \"error\", \"reason\": \"identical_entries\"}\n    longest = max((len(word) for word in words), default=0)\n    for length in range(1, longest + 1):\n        abbreviations = [word[:length] for word in words]\n        if len(set(abbreviations)) == len(words):\n            return {\"status\": \"ok\", \"length\": length, \"abbreviations\": abbreviations}\n    return {\"status\": \"error\", \"reason\": \"identical_entries\"}\n"""
         if observation.task.task_id == "levenshtein_distance":
             return """def levenshtein_distance(left: str, right: str) -> int:\n    \"\"\"Return the Levenshtein edit distance between two strings.\"\"\"\n    if not left:\n        return len(right)\n    if not right:\n        return len(left)\n    previous = list(range(len(right) + 1))\n    for i, left_char in enumerate(left, start=1):\n        current = [i]\n        for j, right_char in enumerate(right, start=1):\n            current.append(min(\n                current[j - 1] + 1,\n                previous[j] + 1,\n                previous[j - 1] + (left_char != right_char),\n            ))\n        previous = current\n    return previous[-1]\n"""
         if observation.task.task_id == "word_frequency":
@@ -273,3 +273,47 @@ def test_run_tasks_writes_run_logs(tmp_path, capsys):
         assert (task_dir / "steps.json").exists()
         assert (task_dir / "final_candidate.py").exists()
         assert (task_dir / "server_metadata.json").exists()
+
+
+class MissingTaskEnvironmentAdapter:
+    async def reset(self, **kwargs):
+        observation = LegacygymEnvironment().reset(task_id="array_length")
+        observation.server_info = {
+            "environment_name": "legacygym",
+            "environment_version": "baseline-v1",
+            "registry_signature": "test-signature",
+            "available_task_ids": ["array_length"],
+            "reward_weights": {},
+            "score_weights": {},
+            "runner_timeout_s": 2.0,
+        }
+        return StepResult(observation=observation, reward=observation.reward, done=observation.done)
+
+    async def step(self, action: LegacygymAction):
+        del action
+        raise RuntimeError("step should not be called")
+
+    async def close(self):
+        return None
+
+
+def test_run_tasks_emits_structured_lines_on_preflight_failure(tmp_path, capsys):
+    env = MissingTaskEnvironmentAdapter()
+    agent = StaticAgent()
+
+    results = asyncio.run(
+        run_tasks(
+            env,
+            agent,
+            task_ids=CURATED_TASK_IDS,
+            benchmark_name="legacygym",
+            model_name="test-model",
+            run_log_dir=tmp_path,
+        )
+    )
+
+    captured = capsys.readouterr().out.strip().splitlines()
+    assert len([line for line in captured if line.startswith("[START]")]) == len(CURATED_TASK_IDS)
+    assert len([line for line in captured if line.startswith("[END]")]) == len(CURATED_TASK_IDS)
+    assert all(not line.startswith("[STEP]") for line in captured)
+    assert all(result["success"] is False for result in results)

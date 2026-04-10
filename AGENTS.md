@@ -26,7 +26,7 @@ This repo is not a production migration platform. It is an evaluation/training e
   - root-level baseline runner in `inference.py`
 - The current curated tasks are:
   - `array_length`
-  - `tokenize_with_escaping`
+  - `automatic_abbreviations`
   - `levenshtein_distance`
   - `word_frequency`
   - `align_columns`

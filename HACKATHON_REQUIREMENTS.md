@@ -20,7 +20,7 @@ This environment must simulate a real-world task, not a toy problem or game.
 - The current task set includes 3 graded tasks:
 - The current task set includes 5 graded tasks:
   - `array_length`
-  - `tokenize_with_escaping`
+  - `automatic_abbreviations`
   - `levenshtein_distance`
   - `word_frequency`
   - `align_columns`
