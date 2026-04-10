@@ -95,6 +95,11 @@ def test_logging_helpers_are_single_line():
     assert format_end_line(True, 3, 0.75, [0.1, 0.2]).count("\n") == 0
 
 
+def test_end_line_clamps_score_into_open_interval():
+    assert "score=0.0001" in format_end_line(False, 0, 0.0, [])
+    assert "score=0.9999" in format_end_line(True, 1, 1.0, [0.5])
+
+
 def test_load_dotenv_populates_missing_values(tmp_path, monkeypatch):
     dotenv_path = tmp_path / ".env"
     dotenv_path.write_text(
@@ -274,7 +279,7 @@ def test_run_episode_returns_failure_instead_of_raising(capsys, tmp_path):
     assert captured[-1].startswith("[END]")
     assert not success
     assert steps == 0
-    assert score == 0.0
+    assert 0.0 < score < 1.0
     assert rewards == []
     assert (tmp_path / "array_length" / "summary.json").exists()
 

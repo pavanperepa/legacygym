@@ -15,12 +15,12 @@ try:
     from ...models import ExecutionResult, GradingResult, TestCaseResult
     from ..execution.runner import PythonExecutionRunner
     from ..tasks.base import TaskDefinition, format_result_summary
-    from .base import DEFAULT_SCORE_WEIGHTS, ScoreWeights
+    from .base import DEFAULT_SCORE_WEIGHTS, ScoreWeights, normalize_task_score
 except ImportError:
     from models import ExecutionResult, GradingResult, TestCaseResult
     from server.execution.runner import PythonExecutionRunner
     from server.tasks.base import TaskDefinition, format_result_summary
-    from server.graders.base import DEFAULT_SCORE_WEIGHTS, ScoreWeights
+    from server.graders.base import DEFAULT_SCORE_WEIGHTS, ScoreWeights, normalize_task_score
 
 
 class DeterministicCodeGrader:
@@ -123,14 +123,10 @@ class DeterministicCodeGrader:
         return execution, grading
 
     def _combine_scores(self, correctness: float, maintainability: float, safety: float) -> float:
-        return max(
-            0.0,
-            min(
-                1.0,
-                correctness * self.weights.correctness
-                + maintainability * self.weights.maintainability
-                + safety * self.weights.safety,
-            ),
+        return normalize_task_score(
+            correctness * self.weights.correctness
+            + maintainability * self.weights.maintainability
+            + safety * self.weights.safety,
         )
 
     def _score_safety(self, execution: ExecutionResult) -> tuple[float, list[str]]:

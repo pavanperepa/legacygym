@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 
+TASK_SCORE_EPSILON = 0.0001
+
 
 @dataclass(frozen=True)
 class ScoreWeights:
@@ -26,3 +28,9 @@ class ScoreWeights:
 
 
 DEFAULT_SCORE_WEIGHTS = ScoreWeights()
+
+
+def normalize_task_score(score: float) -> float:
+    """Clamp a task-level score into the strict open interval (0, 1)."""
+
+    return min(1.0 - TASK_SCORE_EPSILON, max(TASK_SCORE_EPSILON, score))

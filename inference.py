@@ -14,6 +14,7 @@ from typing import Protocol
 from openai import OpenAI
 
 from legacygym import LegacygymAction, LegacygymEnv, LegacygymObservation
+from legacygym.server.graders.base import normalize_task_score
 
 CURATED_TASK_IDS = [
     "array_length",
@@ -80,6 +81,7 @@ def format_step_line(step: int, action: str, reward: float, done: bool, error: s
 
 def format_end_line(success: bool, steps: int, score: float, rewards: list[float]) -> str:
     reward_blob = ",".join(f"{reward:.2f}" for reward in rewards)
+    score = normalize_task_score(score)
     return (
         f"[END] success={str(success).lower()} steps={steps} "
         f"score={score:.4f} rewards={reward_blob}"
@@ -371,7 +373,7 @@ async def run_episode(
     rewards: list[float] = []
     step_index = 0
     success = False
-    score = 0.0
+    score = normalize_task_score(0.0)
     step_records: list[dict[str, object]] = []
     initial_observation: LegacygymObservation | None = None
     observation: LegacygymObservation | None = None
@@ -415,6 +417,7 @@ async def run_episode(
 
             if result.done:
                 score = observation.last_grading.final_score if observation.last_grading else 0.0
+                score = normalize_task_score(score)
                 success = bool(score >= 0.99)
                 break
 
@@ -439,7 +442,7 @@ async def run_episode(
                     actions.append(LegacygymAction(action_type="submit"))
     except Exception as exc:
         success = False
-        score = 0.0
+        score = normalize_task_score(0.0)
         step_records.append(
             {
                 "step": step_index,
