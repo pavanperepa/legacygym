@@ -213,9 +213,18 @@ class OpenAIModelAgent:
         )
         return self._complete(prompt, kind="repair", task_id=observation.task.task_id)
 
+    def probe_proxy(self) -> None:
+        """Make a minimal completion so evaluator proxy traffic is observable."""
+
+        self._complete("Return exactly: ready", kind="probe", task_id="__probe__")
+
 
 def create_model_agent() -> OpenAIModelAgent:
-    base_url, api_key = resolve_api_credentials()
+    if "API_BASE_URL" in os.environ and "API_KEY" in os.environ:
+        base_url = os.environ["API_BASE_URL"]
+        api_key = os.environ["API_KEY"]
+    else:
+        base_url, api_key = resolve_api_credentials()
     client = OpenAI(base_url=base_url, api_key=api_key)
     return OpenAIModelAgent(client=client, model_name=os.getenv("MODEL_NAME", "unknown-model"))
 
@@ -560,6 +569,9 @@ async def main() -> None:
     load_dotenv()
     env = create_environment()
     agent = create_model_agent()
+    probe = getattr(agent, "probe_proxy", None)
+    if callable(probe):
+        probe()
     task_ids = resolve_task_ids()
     benchmark_name = os.getenv("BENCHMARK_NAME", "legacygym")
     model_name = os.getenv("MODEL_NAME", "unknown-model")

@@ -7,6 +7,7 @@ from inference import (
     CURATED_TASK_IDS,
     _resolve_async_result,
     _extract_server_metadata,
+    create_model_agent,
     create_run_log_session_dir,
     format_end_line,
     format_start_line,
@@ -132,6 +133,25 @@ def test_resolve_api_credentials_prefers_api_key_for_configured_proxy(monkeypatc
 
     assert base_url == "https://router.huggingface.co/v1"
     assert api_key == "openai-key"
+
+
+def test_create_model_agent_prefers_exact_submission_env_pair(monkeypatch):
+    captured: dict[str, str | None] = {}
+
+    class FakeOpenAI:
+        def __init__(self, *, base_url=None, api_key=None):
+            captured["base_url"] = base_url
+            captured["api_key"] = api_key
+
+    monkeypatch.setenv("API_BASE_URL", "https://proxy.example/v1")
+    monkeypatch.setenv("API_KEY", "proxy-key")
+    monkeypatch.setenv("HF_TOKEN", "hf-token")
+    monkeypatch.setattr("inference.OpenAI", FakeOpenAI)
+
+    create_model_agent()
+
+    assert captured["base_url"] == "https://proxy.example/v1"
+    assert captured["api_key"] == "proxy-key"
 
 
 def test_resolve_api_credentials_falls_back_to_hf_token_when_api_key_missing(monkeypatch):
