@@ -35,7 +35,12 @@ The environment is intentionally lightweight and deterministic. It does not exec
   - `levenshtein_distance`
   - `word_frequency`
   - `align_columns`
-- The baseline currently runs all curated tasks in sequence by default.
+- The current integrated task set also includes:
+  - `review_file_pattern_move`
+  - `review_extension_to_csv`
+  - `review_compare_csv_files`
+- The baseline currently runs all integrated tasks in sequence by default.
+- This is the stabilized baseline for future RL, reward-shaping, grader, and task-difficulty changes.
 
 ## Tasks
 
@@ -48,6 +53,14 @@ V1 currently ships five fixed Rosetta-backed tasks with increasing difficulty:
 - `align_columns` (`hard`): align dollar-delimited text columns with left/right/center justification.
 
 The dataset source is [rosetta-code-task-comparisons.json](/c:/Users/pavan/openenv-rl-gym/legacygym/rosetta-code-task-comparisons.json). The paired Python snippets are used only as reference material while authoring tasks and tests; the runtime baseline does not use them as direct answers.
+
+Review-dataset program-migration tasks are also part of the integrated run set:
+
+- `review_file_pattern_move`
+- `review_extension_to_csv`
+- `review_compare_csv_files`
+
+These tasks use file-content mappings as the Python contract and are intended to push the benchmark toward richer RL-style migration behavior.
 
 ## Action Space
 
@@ -79,6 +92,7 @@ Deterministic grading is the primary contract:
 - safety comes from AST preflight and controlled execution outcomes.
 
 The final task score is normalized to `[0, 1]`.
+For submission compatibility, emitted task scores are kept strictly inside `(0, 1)`.
 
 RL reward shaping is intentionally minimal in v1 and isolated behind a reward adapter:
 
@@ -111,12 +125,11 @@ Supported environment variables:
 
 `inference.py` automatically loads a root-level `.env` file before reading these variables.
 
-Auth selection follows the submission requirements without breaking direct OpenAI usage:
+Submission-safe auth behavior:
 
-- if `API_BASE_URL` points at an OpenAI endpoint, `OPENAI_API_KEY` or `API_KEY` is used
-- otherwise, `HF_TOKEN` is preferred and `API_KEY` is the fallback
-
-That keeps evaluator compatibility for Hugging Face-style submission flows while avoiding accidental use of an `hf_...` token against `https://api.openai.com/v1`.
+- if evaluator or deployment injects both `API_BASE_URL` and `API_KEY`, those exact values are used
+- if that exact pair is not present, local fallback auth still supports `OPENAI_API_KEY` and `HF_TOKEN`
+- local fallback behavior must not override the evaluator-provided proxy path
 
 The script emits strict evaluator-compatible stdout:
 
@@ -126,7 +139,7 @@ The script emits strict evaluator-compatible stdout:
 [END] success=<true|false> steps=<n> score=<score> rewards=<r1,r2,...,rn>
 ```
 
-By default, `inference.py` runs all three curated tasks in sequence. To narrow the run, set `TASK_NAME` to one task id or a comma-separated list such as `array_length,word_frequency`.
+By default, `inference.py` runs the full integrated task set in sequence. To narrow the run, set `TASK_NAME` to one task id or a comma-separated list such as `array_length,review_extension_to_csv`.
 
 Detailed local artifacts are written under `run_logs/` by default, with one subdirectory per task plus an `aggregate_summary.json` file. Set `RUN_LOG_DIR` to change the output location, or set it to an empty string to disable file artifacts.
 

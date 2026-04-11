@@ -15,6 +15,7 @@ This repo is not a production migration platform. It is an evaluation/training e
 ## Current Status
 
 - The original echo environment has been replaced with a COBOL-to-Python modernization environment.
+- The current repository state is the stable baseline to build on for later RL-environment, reward, grader, and task refinements.
 - The current implementation includes:
   - typed models in `models.py`
   - main environment loop in `server/environment.py`
@@ -30,8 +31,17 @@ This repo is not a production migration platform. It is an evaluation/training e
   - `levenshtein_distance`
   - `word_frequency`
   - `align_columns`
-- The baseline currently runs all curated tasks in sequence by default.
+- The current integrated review-dataset tasks are:
+  - `review_file_pattern_move`
+  - `review_extension_to_csv`
+  - `review_compare_csv_files`
+- The baseline currently runs the full integrated task set in sequence by default.
 - Local run artifacts are written under `run_logs/`.
+- Inference and grading have been hardened for evaluator compatibility:
+  - structured stdout is always emitted from `inference.py`
+  - evaluator-injected `API_BASE_URL` and `API_KEY` take precedence in submission-style runs
+  - task scores are clamped into the strict open interval `(0, 1)`
+- Program-level tasks backed by `cobol-code-sample-review.json` are now part of the integrated run set.
 
 ## Learned Notes
 
@@ -39,6 +49,8 @@ This repo is not a production migration platform. It is an evaluation/training e
 - `inference.py` should tolerate client/runtime layers that return nested awaitables.
 - `inference.py` must fail gracefully and still emit the required `[END]` line.
 - Keep debug artifacts in files under `run_logs/`, not in stdout.
+- Do not let preflight metadata checks block the LLM call path in evaluator runs.
+- Treat exact submission env vars and exact stdout formatting as higher priority than local convenience logic.
 
 ---
 

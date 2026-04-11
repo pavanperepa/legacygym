@@ -32,3 +32,105 @@ def test_grader_normalizes_structured_outputs_before_comparison():
     assert grading.visible_total == 2
     assert grading.visible_passed == 2
     assert grading.correctness_score == 1.0
+
+
+def test_review_file_pattern_move_task_grades_reference_behavior():
+    registry = TaskRegistry()
+    task = registry.get("review_file_pattern_move")
+    grader = DeterministicCodeGrader(PythonExecutionRunner())
+
+    source = """def file_pattern_move(inputs: dict[str, str]) -> dict[str, str]:
+    \"\"\"Return only filenames with supported extensions.\"\"\"
+    kept = []
+    for line in inputs.get("input.txt", "").splitlines():
+        if "." not in line:
+            continue
+        extension = line.rsplit(".", 1)[1]
+        if extension in {"txt", "doc", "docx"}:
+            kept.append(line)
+    output = ""
+    if kept:
+        output = "\\n".join(kept) + "\\n"
+    return {"output.txt": output}
+"""
+
+    _, grading = grader.grade(task, source, mode="full")
+
+    assert grading.visible_passed == grading.visible_total
+    assert grading.hidden_passed == grading.hidden_total
+    assert 0.0 < grading.final_score < 1.0
+
+
+def test_review_compare_csv_files_task_grades_reference_behavior():
+    registry = TaskRegistry()
+    task = registry.get("review_compare_csv_files")
+    grader = DeterministicCodeGrader(PythonExecutionRunner())
+
+    source = """def compare_csv_files(inputs: dict[str, str]) -> dict[str, str]:
+    \"\"\"Return a CSV diff report for the two legacy input files.\"\"\"
+    left_lines = inputs.get("task_func24_inp1", "").splitlines()
+    right_lines = inputs.get("task_func24_inp2", "").splitlines()
+    output_lines = ["Line Number,Status,Content"]
+    max_len = max(len(left_lines), len(right_lines))
+    for index in range(max_len):
+        line_number = f"{index + 1:06d}"
+        left = left_lines[index] if index < len(left_lines) else None
+        right = right_lines[index] if index < len(right_lines) else None
+        if left is not None and right is not None:
+            if left == "" and right == "":
+                continue
+            if left == right:
+                output_lines.append(f"{line_number}, ,{left}")
+            else:
+                if left != "":
+                    output_lines.append(f"{line_number},-,{left}")
+                if right != "":
+                    output_lines.append(f"{line_number},+,{right}")
+        elif left is not None and left != "":
+            output_lines.append(f"{line_number},-,{left}")
+        elif right is not None and right != "":
+            output_lines.append(f"{line_number},+,{right}")
+    return {"task_func24_out": "\\n".join(output_lines) + "\\n"}
+"""
+
+    _, grading = grader.grade(task, source, mode="full")
+
+    assert grading.visible_passed == grading.visible_total
+    assert grading.hidden_passed == grading.hidden_total
+    assert 0.0 < grading.final_score < 1.0
+
+
+def test_review_compare_csv_files_penalizes_reporting_double_blank_rows():
+    registry = TaskRegistry()
+    task = registry.get("review_compare_csv_files")
+    grader = DeterministicCodeGrader(PythonExecutionRunner())
+
+    source = """def compare_csv_files(inputs: dict[str, str]) -> dict[str, str]:
+    \"\"\"Return a CSV diff report for the two legacy input files.\"\"\"
+    left_lines = inputs.get("task_func24_inp1", "").splitlines()
+    right_lines = inputs.get("task_func24_inp2", "").splitlines()
+    output_lines = ["Line Number,Status,Content"]
+    max_len = max(len(left_lines), len(right_lines))
+    for index in range(max_len):
+        line_number = f"{index + 1:06d}"
+        left = left_lines[index] if index < len(left_lines) else None
+        right = right_lines[index] if index < len(right_lines) else None
+        if left is not None and right is not None:
+            if left == right:
+                output_lines.append(f"{line_number}, ,{left}")
+            else:
+                if left != "":
+                    output_lines.append(f"{line_number},-,{left}")
+                if right != "":
+                    output_lines.append(f"{line_number},+,{right}")
+        elif left is not None and left != "":
+            output_lines.append(f"{line_number},-,{left}")
+        elif right is not None and right != "":
+            output_lines.append(f"{line_number},+,{right}")
+    return {"task_func24_out": "\\n".join(output_lines) + "\\n"}
+"""
+
+    _, grading = grader.grade(task, source, mode="full")
+
+    assert grading.final_score < 0.99
+    assert grading.hidden_passed < grading.hidden_total

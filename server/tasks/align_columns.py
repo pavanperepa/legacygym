@@ -62,6 +62,11 @@ def build_task(pair: RosettaTaskPair) -> TaskDefinition:
             (["a$bb", "ccc$d"], "right"),
             _reference_align_columns(["a$bb", "ccc$d"], "right"),
         ),
+        TaskCase(
+            "center_single_column_visible",
+            (["solo", "wider"], "center"),
+            _reference_align_columns(["solo", "wider"], "center"),
+        ),
     ]
     hidden_cases = [
         TaskCase(
@@ -118,6 +123,18 @@ def build_task(pair: RosettaTaskPair) -> TaskDefinition:
             _reference_align_columns(["aa$bbb$c", "d$eeeee$ff", "gggg"], "center"),
             hidden=True,
         ),
+        TaskCase(
+            "leading_empty_column_center",
+            (["$alpha", "bb$cc"], "center"),
+            _reference_align_columns(["$alpha", "bb$cc"], "center"),
+            hidden=True,
+        ),
+        TaskCase(
+            "multiple_trailing_delimiters",
+            (["a$b$$", "cc$ddd$$"], "left"),
+            _reference_align_columns(["a$b$$", "cc$ddd$$"], "left"),
+            hidden=True,
+        ),
     ]
     spec = TaskSpec(
         task_id="align_columns",
@@ -127,8 +144,9 @@ def build_task(pair: RosettaTaskPair) -> TaskDefinition:
             "Translate the COBOL behavior into a Python function named "
             "`align_columns`. Treat each line as a row of `$`-delimited fields and "
             "return aligned text rows with one space between columns. Preserve row "
-            "order, size each column from the widest observed cell, and respect "
-            "`left`, `right`, or `center` alignment."
+            "order, preserve empty leading and trailing fields, size each column "
+            "from the widest observed cell, and respect `left`, `right`, or "
+            "`center` alignment."
         ),
         cobol_source=pair.cobol_code,
         python_function_signature=(

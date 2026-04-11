@@ -34,6 +34,12 @@ class StaticAgent:
             return """def levenshtein_distance(left: str, right: str) -> int:\n    \"\"\"Return the Levenshtein edit distance between two strings.\"\"\"\n    if not left:\n        return len(right)\n    if not right:\n        return len(left)\n    previous = list(range(len(right) + 1))\n    for i, left_char in enumerate(left, start=1):\n        current = [i]\n        for j, right_char in enumerate(right, start=1):\n            current.append(min(\n                current[j - 1] + 1,\n                previous[j] + 1,\n                previous[j - 1] + (left_char != right_char),\n            ))\n        previous = current\n    return previous[-1]\n"""
         if observation.task.task_id == "word_frequency":
             return """from collections import Counter\nimport re\n\n_WORD_RE = re.compile(r\"[A-Za-z]+\")\n\n\ndef word_frequency(text: str, n: int) -> list[tuple[str, int]]:\n    \"\"\"Return the top-n lowercase word counts.\"\"\"\n    counts = Counter(_WORD_RE.findall(text.lower()))\n    return sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:n]\n"""
+        if observation.task.task_id == "review_file_pattern_move":
+            return """def file_pattern_move(inputs: dict[str, str]) -> dict[str, str]:\n    \"\"\"Return filenames whose extensions match the legacy allowlist.\"\"\"\n    kept = []\n    for line in inputs.get(\"input.txt\", \"\").splitlines():\n        if \".\" not in line:\n            continue\n        extension = line.rsplit(\".\", 1)[1]\n        if extension in {\"txt\", \"doc\", \"docx\"}:\n            kept.append(line)\n    output = \"\"\n    if kept:\n        output = \"\\n\".join(kept) + \"\\n\"\n    return {\"output.txt\": output}\n"""
+        if observation.task.task_id == "review_extension_to_csv":
+            return """def convert_extensions_to_csv(inputs: dict[str, str]) -> dict[str, str]:\n    \"\"\"Convert supported legacy file extensions into CSV output names.\"\"\"\n    converted = []\n    for line in inputs.get(\"input.txt\", \"\").splitlines():\n        trimmed = line.strip()\n        if len(trimmed) <= 4:\n            continue\n        suffix = trimmed[-5:]\n        if suffix[1:5] == \".txt\":\n            converted.append(f\"{trimmed[:-5]}.csv\")\n        elif suffix in {\".docx\", \".xlsx\"}:\n            converted.append(f\"{trimmed[:-5]}.csv\")\n    output = \"\"\n    if converted:\n        output = \"\\n\".join(converted) + \"\\n\"\n    return {\"output.txt\": output}\n"""
+        if observation.task.task_id == "review_compare_csv_files":
+            return """def compare_csv_files(inputs: dict[str, str]) -> dict[str, str]:\n    \"\"\"Return a CSV diff report for the two legacy input files.\"\"\"\n    left_lines = inputs.get(\"task_func24_inp1\", \"\").splitlines()\n    right_lines = inputs.get(\"task_func24_inp2\", \"\").splitlines()\n    output_lines = [\"Line Number,Status,Content\"]\n    max_len = max(len(left_lines), len(right_lines))\n    for index in range(max_len):\n        line_number = f\"{index + 1:06d}\"\n        left = left_lines[index] if index < len(left_lines) else None\n        right = right_lines[index] if index < len(right_lines) else None\n        if left is not None and right is not None:\n            if left == right:\n                output_lines.append(f\"{line_number}, ,{left}\")\n            else:\n                if left != \"\":\n                    output_lines.append(f\"{line_number},-,{left}\")\n                if right != \"\":\n                    output_lines.append(f\"{line_number},+,{right}\")\n        elif left is not None and left != \"\":\n            output_lines.append(f\"{line_number},-,{left}\")\n        elif right is not None and right != \"\":\n            output_lines.append(f\"{line_number},+,{right}\")\n    return {\"task_func24_out\": \"\\n\".join(output_lines) + \"\\n\"}\n"""
         return """from itertools import zip_longest\n\n\ndef _justify(value: str, width: int, alignment: str) -> str:\n    if alignment == \"left\":\n        return value.ljust(width)\n    if alignment == \"right\":\n        return value.rjust(width)\n    if alignment == \"center\":\n        return value.center(width)\n    raise ValueError(f\"Unsupported alignment: {alignment}\")\n\n\ndef align_columns(lines: list[str], alignment: str) -> list[str]:\n    \"\"\"Align dollar-delimited columns across all input rows.\"\"\"\n    rows = [line.rstrip(\"$\").split(\"$\") for line in lines]\n    widths = [max(len(cell) for cell in column) for column in zip_longest(*rows, fillvalue=\"\")]\n    return [\n        \" \".join(_justify(cell, widths[index], alignment) for index, cell in enumerate(row)).rstrip()\n        for row in rows\n    ]\n"""
 
     def repair_solution(self, observation):
@@ -316,7 +322,16 @@ def test_run_tasks_writes_run_logs(tmp_path, capsys):
 class MissingTaskEnvironmentAdapter:
     async def reset(self, **kwargs):
         task_id = kwargs.get("task_id", "array_length")
-        if task_id not in {"array_length", "automatic_abbreviations", "levenshtein_distance", "word_frequency", "align_columns"}:
+        if task_id not in {
+            "array_length",
+            "automatic_abbreviations",
+            "levenshtein_distance",
+            "word_frequency",
+            "align_columns",
+            "review_file_pattern_move",
+            "review_extension_to_csv",
+            "review_compare_csv_files",
+        }:
             raise RuntimeError(f"unknown task: {task_id}")
         observation = LegacygymEnvironment().reset(task_id="array_length")
         observation.server_info = {

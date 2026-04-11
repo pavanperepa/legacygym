@@ -22,6 +22,9 @@ CURATED_TASK_IDS = [
     "levenshtein_distance",
     "word_frequency",
     "align_columns",
+    "review_file_pattern_move",
+    "review_extension_to_csv",
+    "review_compare_csv_files",
 ]
 
 

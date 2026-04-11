@@ -17,9 +17,14 @@ from .tasks import (
     build_align_columns_task,
     build_automatic_abbreviations_task,
     build_array_length_task,
+    build_compare_csv_files_task,
+    build_extension_to_csv_task,
+    build_file_pattern_move_task,
     build_levenshtein_distance_task,
     build_word_frequency_task,
+    cobol_review_dataset_path,
     dataset_path,
+    load_cobol_review_samples,
     load_rosetta_pairs,
 )
 
@@ -29,6 +34,7 @@ class TaskRegistry:
 
     def __init__(self, path: Path | None = None):
         self._pairs = load_rosetta_pairs(path or dataset_path())
+        self._review_samples = load_cobol_review_samples(cobol_review_dataset_path())
         self._tasks = self._build_tasks()
         self._ordered_ids = list(self._tasks)
 
@@ -43,6 +49,15 @@ class TaskRegistry:
             ),
             "word_frequency": build_word_frequency_task(self._pairs["Word frequency"]),
             "align_columns": build_align_columns_task(self._pairs["Align columns"]),
+            "review_file_pattern_move": build_file_pattern_move_task(
+                self._review_samples["task_func_02"]
+            ),
+            "review_extension_to_csv": build_extension_to_csv_task(
+                self._review_samples["task_func_08"]
+            ),
+            "review_compare_csv_files": build_compare_csv_files_task(
+                self._review_samples["task_func_24"]
+            ),
         }
 
     def get(self, task_id: str) -> TaskDefinition:

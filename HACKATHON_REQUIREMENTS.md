@@ -17,17 +17,25 @@ This environment must simulate a real-world task, not a toy problem or game.
   - `reset()`
   - `step()`
   - `state()`
-- The current task set includes 3 graded tasks:
 - The current task set includes 5 graded tasks:
   - `array_length`
   - `automatic_abbreviations`
   - `levenshtein_distance`
   - `word_frequency`
   - `align_columns`
+- The integrated review-dataset tasks also include:
+  - `review_file_pattern_move`
+  - `review_extension_to_csv`
+  - `review_compare_csv_files`
 - Deterministic grading, controlled execution, and a minimal reward adapter are implemented.
-- A root-level `inference.py` exists and currently runs all curated tasks in sequence by default.
+- A root-level `inference.py` exists and currently runs the full integrated task set in sequence by default.
 - A root-level `Dockerfile` exists for deployment.
 - Local execution artifacts are written under `run_logs/`.
+- Current submission-safe baseline behavior also includes:
+  - strict `[START]` / `[STEP]` / `[END]` stdout emission even on failure paths
+  - evaluator-provided `API_BASE_URL` and `API_KEY` taking precedence in submission runs
+  - task scores kept in the strict open interval `(0, 1)`
+- Program-level file-migration tasks from `cobol-code-sample-review.json` are integrated into the main task set for future RL experiments.
 
 ---
 
@@ -60,7 +68,7 @@ Each task must have a programmatic grader.
 ### 4. Deterministic Graders
 Graders must:
 - produce reproducible scores,
-- return values in the range `0.0` to `1.0`,
+- return task-level values strictly inside `(0, 1)` for submission compatibility,
 - have clear success/failure criteria,
 - not always return the same result.
 
@@ -99,6 +107,7 @@ The sample code also supports:
 
 Note:
 - in evaluator/submission runs, prefer the injected `API_BASE_URL` and `API_KEY` exactly as provided so requests are observed on the expected proxy path.
+- do not let local fallback auth or local convenience routing override that injected pair.
 
 Important note:
 - the prose header mentions `LOCAL_IMAGE_NAME`,
@@ -124,6 +133,9 @@ The sample script establishes a concrete pattern the repo should support:
 
 Your environment and inference script should align with this pattern.
 
+Note:
+- preflight or metadata-probe failures must not prevent the baseline from attempting the proxy-backed model call path.
+
 ---
 
 ## STDOUT Logging Requirements
@@ -142,7 +154,7 @@ Rules from the sample:
 - `done` and `success` as lowercase booleans,
 - `error` must be raw last-action error text or `null`,
 - all fields on a single line,
-- each task score must be in `[0, 1]`. 
+- each task score must be strictly inside `(0, 1)`. 
 
 Do not change this format.
 

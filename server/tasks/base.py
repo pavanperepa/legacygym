@@ -29,6 +29,20 @@ class RosettaTaskPair:
 
 
 @dataclass(frozen=True)
+class CobolReviewSample:
+    """Program-level COBOL sample with file fixtures and expected outputs."""
+
+    program_name: str
+    input_file_names: List[str]
+    output_file_names: List[str]
+    inputs: Dict[str, str]
+    outputs: Dict[str, str]
+    complete_prompt: str
+    instruct_prompt: str
+    canonical_solution: str
+
+
+@dataclass(frozen=True)
 class TaskCase:
     """Deterministic test case for a migration task."""
 
