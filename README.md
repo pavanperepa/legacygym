@@ -52,7 +52,7 @@ V1 currently ships five fixed Rosetta-backed tasks with increasing difficulty:
 - `word_frequency` (`hard`): normalize text, count words, and return the top `n` items with deterministic tie-breaking.
 - `align_columns` (`hard`): align dollar-delimited text columns with left/right/center justification.
 
-The dataset source is [rosetta-code-task-comparisons.json](/c:/Users/pavan/openenv-rl-gym/legacygym/rosetta-code-task-comparisons.json). The paired Python snippets are used only as reference material while authoring tasks and tests; the runtime baseline does not use them as direct answers.
+The dataset source is `rosetta-code-task-comparisons.json`. The paired Python snippets are used only as reference material while authoring tasks and tests; the runtime baseline does not use them as direct answers.
 
 Review-dataset program-migration tasks are also part of the integrated run set:
 
@@ -102,7 +102,7 @@ RL reward shaping is intentionally minimal in v1 and isolated behind a reward ad
 
 ## Inference Compatibility
 
-The root-level [inference.py](/c:/Users/pavan/openenv-rl-gym/legacygym/inference.py) follows the required evaluator control flow:
+The root-level `inference.py` follows the required evaluator control flow:
 
 1. create an OpenAI client from `API_BASE_URL` and `HF_TOKEN` or `API_KEY`,
 2. create the environment from `IMAGE_NAME`, `ENV_BASE_URL`, or a local default URL,
@@ -197,30 +197,23 @@ asyncio.run(main())
 Run the baseline inference loop:
 
 ```bash
-@"
-API_BASE_URL=https://api.openai.com/v1
-MODEL_NAME=your-model
-API_KEY=sk-...
-TASK_NAME=all
-RUN_LOG_DIR=run_logs
-# Optional:
-# ENV_BASE_URL=http://127.0.0.1:8000
-# IMAGE_NAME=legacygym-env:latest
-"@ | Set-Content .env
-
 python inference.py
 ```
+
+First copy `.env.example` to `.env`, then update `.env` with your model settings. The default template is local-server friendly and keeps submission-style variables explicit.
 
 For submission-style or HF-compatible routers, use:
 
 ```dotenv
 API_BASE_URL=https://your-router/v1
 MODEL_NAME=your-model
-HF_TOKEN=hf_...
+HF_TOKEN=your-hf-token
 TASK_NAME=all
 ```
 
 ## Docker
+
+The root-level `Dockerfile` is the canonical build path for this repo.
 
 Build the root-level Docker image:
 
